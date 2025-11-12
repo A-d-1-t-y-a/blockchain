@@ -230,7 +230,7 @@ export class FROSTCoordinator {
   getThresholdConfig(): ThresholdConfig {
     return {
       threshold: this.threshold,
-      participants: this.participants.size,
+      participants: this.participants.size || 0,
     };
   }
 

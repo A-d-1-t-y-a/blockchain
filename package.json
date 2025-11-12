@@ -12,7 +12,9 @@
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
     "verify": "hardhat verify --network sepolia",
     "lint": "solhint 'contracts/**/*.sol'",
-    "clean": "hardhat clean"
+    "clean": "hardhat clean",
+    "api:start": "cd api && pnpm start",
+    "api:dev": "cd api && pnpm dev"
   },
   "keywords": [],
   "author": "",

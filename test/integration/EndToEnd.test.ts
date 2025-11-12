@@ -79,9 +79,11 @@ describe("End-to-End Integration", function () {
         )
       ).to.be.revertedWith("AccessControl: invalid FROST signature");
 
-      // Verify request was logged (even if failed)
+      // When transaction reverts, nothing is stored on-chain
+      // So getAuthorization will return default/empty struct
       const authorization = await accessControl.getAuthorization(requestIdBytes);
-      expect(authorization.requestId).to.equal(requestIdBytes);
+      // Request ID will be zero bytes when not stored (transaction reverted)
+      expect(authorization.requestId).to.equal(ethers.ZeroHash);
     });
   });
 

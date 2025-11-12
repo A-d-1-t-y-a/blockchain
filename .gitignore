@@ -39,3 +39,5 @@ build/
 # Test outputs
 test-results/
 
+pnpm-lock.yaml
+

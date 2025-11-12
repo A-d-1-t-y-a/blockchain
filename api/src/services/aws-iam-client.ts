@@ -33,9 +33,47 @@ export class AWSIAMClient {
   private region: string;
 
   constructor(region: string = "us-east-1") {
-    this.region = region;
-    this.iamClient = new IAMClient({ region });
-    this.stsClient = new STSClient({ region });
+    this.region = region || process.env.AWS_REGION || "us-east-1";
+    
+    // Use environment variables if available
+    const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+    
+    const clientConfig: any = { 
+      region: this.region,
+    };
+
+    // Only set credentials if both are provided
+    if (accessKeyId && secretAccessKey) {
+      const trimmedKeyId = accessKeyId.trim();
+      const trimmedSecret = secretAccessKey.trim();
+      
+      // Validate they're not empty after trimming
+      if (trimmedKeyId.length > 0 && trimmedSecret.length > 0) {
+        clientConfig.credentials = {
+          accessKeyId: trimmedKeyId,
+          secretAccessKey: trimmedSecret,
+        };
+        console.log("✅ AWS credentials loaded from environment variables");
+        console.log(`   Access Key ID: ${trimmedKeyId.substring(0, 8)}...${trimmedKeyId.substring(trimmedKeyId.length - 4)}`);
+      } else {
+        console.warn("⚠️ AWS credentials found but are empty after trimming");
+        console.warn("⚠️ Please check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env");
+      }
+    } else {
+      console.warn("⚠️ AWS credentials not found in environment variables");
+      console.warn("⚠️ Looking for: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY");
+      console.warn("⚠️ Current values:", { 
+        hasKeyId: !!accessKeyId, 
+        hasSecret: !!secretAccessKey,
+        keyIdLength: accessKeyId?.length || 0,
+        secretLength: secretAccessKey?.length || 0
+      });
+      // AWS SDK will try to load from default credential chain
+    }
+
+    this.iamClient = new IAMClient(clientConfig);
+    this.stsClient = new STSClient(clientConfig);
   }
 
   /**
@@ -45,12 +83,20 @@ export class AWSIAMClient {
     try {
       const command = new GetCallerIdentityCommand({});
       const response = await this.stsClient.send(command);
+      console.log("✅ AWS credentials verified successfully");
       return {
         accountId: response.Account || "",
         arn: response.Arn || "",
       };
-    } catch (error) {
-      throw new Error(`AWS credential verification failed: ${error}`);
+    } catch (error: any) {
+      const errorMessage = error.message || String(error);
+      console.error("❌ AWS credential verification failed:", errorMessage);
+      
+      // Provide helpful error message
+      if (errorMessage.includes("Could not load credentials")) {
+        throw new Error(`AWS credential verification failed: ${errorMessage}. Please check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file`);
+      }
+      throw new Error(`AWS credential verification failed: ${errorMessage}`);
     }
   }
 
