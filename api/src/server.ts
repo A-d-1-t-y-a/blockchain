@@ -14,37 +14,8 @@ import { FROSTCoordinator } from "./services/frost-coordinator";
 import { AWSIAMClient } from "./services/aws-iam-client";
 import { BlockchainClient } from "./services/blockchain-client";
 
-// Load environment variables from parent directory .env file
 dotenv.config({ path: "../.env" });
-// Also try current directory
 dotenv.config();
-
-// Debug: Log AWS environment variables (without exposing secrets)
-if (process.env.AWS_ACCESS_KEY_ID) {
-  console.log("✅ AWS_ACCESS_KEY_ID found in environment");
-  console.log(
-    `   Key ID: ${process.env.AWS_ACCESS_KEY_ID.substring(
-      0,
-      4
-    )}...${process.env.AWS_ACCESS_KEY_ID.substring(
-      process.env.AWS_ACCESS_KEY_ID.length - 4
-    )}`
-  );
-} else {
-  console.warn("⚠️ AWS_ACCESS_KEY_ID not found in environment");
-}
-
-if (process.env.AWS_SECRET_ACCESS_KEY) {
-  console.log("✅ AWS_SECRET_ACCESS_KEY found in environment");
-} else {
-  console.warn("⚠️ AWS_SECRET_ACCESS_KEY not found in environment");
-}
-
-if (process.env.AWS_REGION) {
-  console.log(`✅ AWS_REGION: ${process.env.AWS_REGION}`);
-} else {
-  console.warn("⚠️ AWS_REGION not set, using default: us-east-1");
-}
 
 const app = express();
 const httpServer = createServer(app);
@@ -55,17 +26,13 @@ const io = new SocketIOServer(httpServer, {
   },
 });
 
-// Middleware
 app.use(cors());
 app.use(express.json());
-
-// Initialize services
 const frostCoordinator = new FROSTCoordinator(
   parseInt(process.env.FROST_THRESHOLD || "3"),
   parseInt(process.env.FROST_PARTICIPANTS || "5")
 );
 
-// Initialize AWS IAM client with region from env
 const awsRegion = process.env.AWS_REGION || "us-east-1";
 const awsIAMClient = new AWSIAMClient(awsRegion);
 
@@ -92,21 +59,10 @@ if (
       "⚠️ Blockchain client initialization failed:",
       error.message || error
     );
-    console.warn("⚠️ API will work without blockchain features");
-    console.warn("⚠️ This is OK - blockchain features are optional");
-    blockchainClient = null; // Ensure it's null on error
+    blockchainClient = null;
   }
-} else {
-  console.warn(
-    "⚠️ Blockchain client not configured - some features will be unavailable"
-  );
-  console.warn(
-    "⚠️ Set SEPOLIA_RPC_URL, PRIVATE_KEY, and contract addresses in .env to enable"
-  );
-  console.warn("⚠️ This is OK - blockchain features are optional");
 }
 
-// Health check endpoint
 app.get("/health", async (req: Request, res: Response) => {
   try {
     const health: any = {
@@ -119,7 +75,6 @@ app.get("/health", async (req: Request, res: Response) => {
       },
     };
 
-    // Check AWS credentials
     try {
       await awsIAMClient.verifyCredentials();
       health.services.aws = "operational";
@@ -136,7 +91,6 @@ app.get("/health", async (req: Request, res: Response) => {
   }
 });
 
-// Authorization endpoint
 app.post("/api/authorize", async (req: Request, res: Response) => {
   try {
     const { principal, resource, action, signatureShares } = req.body;
@@ -145,12 +99,10 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Generate request ID
     const requestId = `${Date.now()}-${Math.random()
       .toString(36)
       .substr(2, 9)}`;
 
-    // Step 1: Aggregate FROST signature
     let aggregatedSignature;
     let groupPublicKey;
     try {
@@ -167,14 +119,12 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
       });
     }
 
-    // Step 2: Check AWS IAM policy
     const awsDecision = await awsIAMClient.checkAccess({
       principal,
       resource,
       action,
     });
 
-    // Step 3: Request on-chain authorization (if blockchain client is configured)
     let blockchainResult = null;
     if (blockchainClient) {
       try {
@@ -187,8 +137,6 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
           publicKey: groupPublicKey,
         });
       } catch (error: any) {
-        console.error("Blockchain authorization error:", error);
-        // Continue with AWS decision if blockchain fails
         blockchainResult = {
           requestId,
           authorized: false,
@@ -197,11 +145,8 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
       }
     }
 
-    // Step 4: Final decision (both AWS and blockchain must allow)
     const authorized =
       awsDecision.allowed && (blockchainResult?.authorized ?? true);
-
-    // Emit WebSocket event
     io.emit("authorization", {
       requestId,
       principal,
@@ -226,7 +171,6 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
   }
 });
 
-// Get authorization status
 app.get("/api/authorize/:requestId", async (req: Request, res: Response) => {
   try {
     const { requestId } = req.params;
@@ -244,7 +188,6 @@ app.get("/api/authorize/:requestId", async (req: Request, res: Response) => {
   }
 });
 
-// FROST management endpoints
 app.get("/api/frost/config", (req: Request, res: Response) => {
   const config = frostCoordinator.getThresholdConfig();
   res.json(config);
@@ -255,7 +198,6 @@ app.get("/api/frost/participants", (req: Request, res: Response) => {
   res.json(participants);
 });
 
-// Policy management
 app.post("/api/policy/update-root", async (req: Request, res: Response) => {
   try {
     const { newRoot } = req.body;
@@ -279,21 +221,12 @@ app.post("/api/policy/update-root", async (req: Request, res: Response) => {
   }
 });
 
-// WebSocket connection handling
 io.on("connection", (socket) => {
-  console.log("Client connected:", socket.id);
-
-  socket.on("disconnect", () => {
-    console.log("Client disconnected:", socket.id);
-  });
-
-  // Subscribe to authorization events
   socket.on("subscribe", (data) => {
     socket.join(`authorization:${data.requestId}`);
   });
 });
 
-// Error handling middleware
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error("Error:", err);
   res
@@ -301,7 +234,6 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
     .json({ error: "Internal server error", message: err.message });
 });
 
-// Start server
 const PORT = parseInt(process.env.API_PORT || "3000", 10);
 httpServer
   .listen(PORT, () => {

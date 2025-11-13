@@ -62,8 +62,6 @@ export class BlockchainClient {
       );
     }
 
-    // Initialize contract instances
-    // Try to load artifacts, but handle gracefully if they don't exist
     let AccessControlFactory, ThresholdManagerFactory, FROSTVerifierFactory;
     try {
       AccessControlFactory = require("../../../artifacts/contracts/AccessControlContract.sol/AccessControlContract.json");
@@ -108,7 +106,6 @@ export class BlockchainClient {
       const actionBytes = ethers.id(request.action);
       const principalAddress = ethers.getAddress(request.principal);
 
-      // Estimate gas first
       const gasEstimate =
         await this.accessControl.requestAuthorization.estimateGas(
           requestIdBytes,
@@ -119,7 +116,6 @@ export class BlockchainClient {
           request.publicKey
         );
 
-      // Send transaction
       const tx = await this.accessControl.requestAuthorization(
         requestIdBytes,
         principalAddress,
@@ -132,13 +128,11 @@ export class BlockchainClient {
         }
       );
 
-      // Wait for confirmation
       const receipt = await tx.wait();
       if (!receipt) {
         throw new Error("Transaction receipt not found");
       }
 
-      // Get authorization decision from event
       const decision = await this.accessControl.getAuthorization(
         requestIdBytes
       );
@@ -185,7 +179,6 @@ export class BlockchainClient {
         throw new Error("Transaction receipt not found");
       }
 
-      // Get results for each request
       const results: AuthorizationResult[] = [];
       for (const request of requests) {
         const requestIdBytes = ethers.id(request.requestId);
@@ -271,8 +264,6 @@ export class BlockchainClient {
       signature: string
     ) => void
   ): void {
-    // Note: Event listening requires proper event filter setup
-    // This is a simplified implementation - in production use proper event filters
     try {
       const filter = this.accessControl.filters.AuthorizationDecided();
       this.accessControl.on(

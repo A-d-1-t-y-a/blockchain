@@ -1,6 +1,6 @@
 /**
  * FROST Threshold Signature Coordinator
- * 
+ *
  * Implements RFC 9591 FROST (Flexible Round-Optimized Schnorr Threshold) signatures
  * for decentralized access control. This coordinator manages:
  * - Distributed Key Generation (DKG)
@@ -9,8 +9,8 @@
  * - Key refresh mechanisms
  */
 
-import * as secp256k1 from '@noble/secp256k1';
-import { sha256 } from '@noble/hashes/sha256';
+import * as secp256k1 from "@noble/secp256k1";
+import { sha256 } from "@noble/hashes/sha256";
 
 export interface Participant {
   id: string;
@@ -44,12 +44,14 @@ export class FROSTCoordinator {
 
   constructor(threshold: number, totalParticipants: number) {
     if (threshold < 1 || threshold > totalParticipants) {
-      throw new Error('Threshold must be between 1 and total participants');
+      throw new Error("Threshold must be between 1 and total participants");
     }
     if (threshold < Math.ceil(totalParticipants / 2)) {
-      throw new Error('Threshold must be at least majority (n/2 + 1) for security');
+      throw new Error(
+        "Threshold must be at least majority (n/2 + 1) for security"
+      );
     }
-    
+
     this.threshold = threshold;
     this.participants = new Map();
   }
@@ -64,18 +66,20 @@ export class FROSTCoordinator {
     shares: Map<string, string>;
   }> {
     if (participantIds.length < this.threshold) {
-      throw new Error(`Need at least ${this.threshold} participants for threshold`);
+      throw new Error(
+        `Need at least ${this.threshold} participants for threshold`
+      );
     }
 
     // Generate group key pair (simplified - in production use proper DKG)
     const privateKey = secp256k1.utils.randomPrivateKey();
     const publicKey = secp256k1.getPublicKey(privateKey);
-    this.groupPublicKey = Buffer.from(publicKey).toString('hex');
+    this.groupPublicKey = Buffer.from(publicKey).toString("hex");
 
     // Generate shares using Shamir Secret Sharing (simplified)
     // In production, use proper threshold secret sharing
-    const shares = this.generateShares(privateKey, participantIds.length, this.threshold);
-    
+    const shares = this.generateShares(privateKey, participantIds.length);
+
     participantIds.forEach((id, index) => {
       this.keyShares.set(id, shares[index]);
       this.participants.set(id, {
@@ -104,20 +108,21 @@ export class FROSTCoordinator {
     }
 
     if (!this.groupPublicKey) {
-      throw new Error('DKG not initialized. Call initializeDKG first');
+      throw new Error("DKG not initialized. Call initializeDKG first");
     }
 
     // Verify all participants are active
-    const activeParticipants = Array.from(this.participants.values())
-      .filter(p => p.isActive);
-    
+    const activeParticipants = Array.from(this.participants.values()).filter(
+      (p) => p.isActive
+    );
+
     if (activeParticipants.length < this.threshold) {
-      throw new Error('Not enough active participants');
+      throw new Error("Not enough active participants");
     }
 
     // Hash the message
     const messageHash = sha256(message);
-    
+
     // Aggregate signature shares
     // In production, use proper FROST aggregation algorithm
     const aggregatedSignature = this.aggregateSignatures(
@@ -135,9 +140,12 @@ export class FROSTCoordinator {
   /**
    * Add a new participant (requires key refresh)
    */
-  async addParticipant(participantId: string, publicKey: string): Promise<void> {
+  async addParticipant(
+    participantId: string,
+    publicKey: string
+  ): Promise<void> {
     if (this.participants.has(participantId)) {
-      throw new Error('Participant already exists');
+      throw new Error("Participant already exists");
     }
 
     this.participants.set(participantId, {
@@ -156,11 +164,13 @@ export class FROSTCoordinator {
   async removeParticipant(participantId: string): Promise<void> {
     const participant = this.participants.get(participantId);
     if (!participant) {
-      throw new Error('Participant not found');
+      throw new Error("Participant not found");
     }
 
     if (this.participants.size - 1 < this.threshold) {
-      throw new Error('Cannot remove participant: would violate threshold requirement');
+      throw new Error(
+        "Cannot remove participant: would violate threshold requirement"
+      );
     }
 
     this.participants.delete(participantId);
@@ -175,11 +185,11 @@ export class FROSTCoordinator {
    */
   async updateThreshold(newThreshold: number): Promise<void> {
     if (newThreshold < 1 || newThreshold > this.participants.size) {
-      throw new Error('Invalid threshold value');
+      throw new Error("Invalid threshold value");
     }
 
     if (newThreshold < Math.ceil(this.participants.size / 2)) {
-      throw new Error('Threshold must be at least majority');
+      throw new Error("Threshold must be at least majority");
     }
 
     this.threshold = newThreshold;
@@ -194,14 +204,10 @@ export class FROSTCoordinator {
     // In production, implement proper CHURP protocol
     // For MVP, we regenerate shares with same group key
     const participantIds = Array.from(this.participants.keys());
-    
-    if (participantIds.length < this.threshold) {
-      throw new Error('Not enough participants for threshold');
-    }
 
-    // Re-generate shares (in production, use proactive secret sharing)
-    // This is a simplified version - production should use CHURP
-    console.log('Key refresh initiated for participants:', participantIds);
+    if (participantIds.length < this.threshold) {
+      throw new Error("Not enough participants for threshold");
+    }
   }
 
   /**
@@ -214,12 +220,12 @@ export class FROSTCoordinator {
   ): Promise<boolean> {
     try {
       const messageHash = sha256(message);
-      const sigBytes = Buffer.from(signature, 'hex');
-      const pubKeyBytes = Buffer.from(publicKey, 'hex');
-      
+      const sigBytes = Buffer.from(signature, "hex");
+      const pubKeyBytes = Buffer.from(publicKey, "hex");
+
       return secp256k1.verify(sigBytes, messageHash, pubKeyBytes);
     } catch (error) {
-      console.error('Signature verification error:', error);
+      console.error("Signature verification error:", error);
       return false;
     }
   }
@@ -238,25 +244,21 @@ export class FROSTCoordinator {
    * Get all active participants
    */
   getActiveParticipants(): Participant[] {
-    return Array.from(this.participants.values()).filter(p => p.isActive);
+    return Array.from(this.participants.values()).filter((p) => p.isActive);
   }
 
   /**
    * Generate shares using simplified Shamir Secret Sharing
    * In production, use proper threshold secret sharing library
    */
-  private generateShares(
-    secret: Uint8Array,
-    totalShares: number,
-    threshold: number
-  ): string[] {
+  private generateShares(secret: Uint8Array, totalShares: number): string[] {
     // Simplified implementation - in production use proper secret sharing
     // This is a placeholder that generates deterministic shares
     const shares: string[] = [];
     for (let i = 0; i < totalShares; i++) {
       // In production, use a proper secret sharing library
       const share = sha256(Buffer.concat([secret, Buffer.from([i])]));
-      shares.push(Buffer.from(share).toString('hex'));
+      shares.push(Buffer.from(share).toString("hex"));
     }
     return shares;
   }
@@ -266,17 +268,17 @@ export class FROSTCoordinator {
    */
   private derivePublicKeyFromShare(share: string): string {
     // In production, properly derive public key from share
-    const shareBytes = Buffer.from(share, 'hex');
+    const shareBytes = Buffer.from(share, "hex");
     const privateKey = shareBytes.slice(0, 32);
     if (privateKey.length < 32) {
       // Pad if needed
       const padded = Buffer.alloc(32);
       privateKey.copy(padded, 32 - privateKey.length);
       const publicKey = secp256k1.getPublicKey(padded);
-      return Buffer.from(publicKey).toString('hex');
+      return Buffer.from(publicKey).toString("hex");
     }
     const publicKey = secp256k1.getPublicKey(privateKey);
-    return Buffer.from(publicKey).toString('hex');
+    return Buffer.from(publicKey).toString("hex");
   }
 
   /**
@@ -290,17 +292,16 @@ export class FROSTCoordinator {
     // Simplified aggregation - in production use proper FROST algorithm
     // This combines shares using Lagrange interpolation
     const aggregated = new Uint8Array(64); // 64 bytes for secp256k1 signature
-    
+
     // Placeholder aggregation logic
     // In production, implement proper FROST signature aggregation
     shares.forEach((share, index) => {
-      const shareBytes = Buffer.from(share.share, 'hex');
+      const shareBytes = Buffer.from(share.share, "hex");
       for (let i = 0; i < Math.min(aggregated.length, shareBytes.length); i++) {
         aggregated[i] = (aggregated[i] + shareBytes[i]) % 256;
       }
     });
 
-    return Buffer.from(aggregated).toString('hex');
+    return Buffer.from(aggregated).toString("hex");
   }
 }
-
