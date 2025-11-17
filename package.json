@@ -14,7 +14,16 @@
     "lint": "solhint 'contracts/**/*.sol'",
     "clean": "hardhat clean",
     "api:start": "cd api && pnpm start",
-    "api:dev": "cd api && pnpm dev"
+    "api:dev": "cd api && pnpm dev",
+    "test:api": "mocha test/api/api-tests.ts --require ts-node/register --timeout 20000",
+    "test:websocket": "mocha test/api/websocket-tests.ts --require ts-node/register --timeout 20000",
+    "test:integration": "mocha test/integration/api-integration.test.ts --require ts-node/register --timeout 20000",
+    "test:security": "mocha test/security/security-tests.ts --require ts-node/register --timeout 20000",
+    "test:error": "mocha test/error-handling/error-tests.ts --require ts-node/register --timeout 20000",
+    "test:edge": "mocha test/edge-cases/edge-tests.ts --require ts-node/register --timeout 20000",
+    "test:performance": "mocha test/performance/performance-tests.ts --require ts-node/register --timeout 20000",
+    "test:all-api": "npm run test:api && npm run test:websocket && npm run test:integration && npm run test:security && npm run test:error && npm run test:edge && npm run test:performance",
+    "test:all": "npm run test && npm run test:all-api"
   },
   "keywords": [],
   "author": "",

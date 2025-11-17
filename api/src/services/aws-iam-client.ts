@@ -73,14 +73,29 @@ export class AWSIAMClient {
       };
     } catch (error: any) {
       const errorMessage = error.message || String(error);
-      console.error("❌ AWS credential verification failed:", errorMessage);
-
-      // Provide helpful error message
-      if (errorMessage.includes("Could not load credentials")) {
+      
+      // Provide helpful error messages based on error type
+      if (errorMessage.includes("Could not load credentials") || 
+          errorMessage.includes("Missing credentials")) {
         throw new Error(
-          `AWS credential verification failed: ${errorMessage}. Please check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file`
+          `AWS credential verification failed: Credentials not found. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file`
         );
       }
+      
+      if (errorMessage.includes("InvalidClientTokenId") || 
+          errorMessage.includes("invalid") ||
+          errorMessage.includes("The security token included in the request is invalid")) {
+        throw new Error(
+          `AWS credential verification failed: Invalid or expired credentials. Please check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file and ensure they are valid and not expired`
+        );
+      }
+      
+      if (errorMessage.includes("SignatureDoesNotMatch")) {
+        throw new Error(
+          `AWS credential verification failed: Signature mismatch. Please verify AWS_SECRET_ACCESS_KEY is correct`
+        );
+      }
+      
       throw new Error(`AWS credential verification failed: ${errorMessage}`);
     }
   }
@@ -92,24 +107,23 @@ export class AWSIAMClient {
    */
   async checkAccess(request: AccessRequest): Promise<PolicyDecision> {
     try {
-      // Extract user name from ARN
-      const userName = this.extractUserName(request.principal);
-      if (!userName) {
+      // Check if principal is an STS assumed role
+      const isAssumedRole = request.principal.includes(":sts::") && 
+                           request.principal.includes(":assumed-role/");
+      
+      // For STS assumed roles, use the principal ARN directly for simulation
+      // For IAM users/roles, extract the name
+      const principalName = this.extractUserName(request.principal);
+      
+      if (!isAssumedRole && !principalName) {
         return {
           allowed: false,
-          reason: "Invalid principal ARN",
+          reason: "Invalid principal ARN format",
         };
       }
 
-      // Get user's attached policies
-      const listPoliciesCommand = new ListAttachedUserPoliciesCommand({
-        UserName: userName,
-      });
-      const policiesResponse = await this.iamClient.send(listPoliciesCommand);
-      const policyArns =
-        policiesResponse.AttachedPolicies?.map((p) => p.PolicyArn || "") || [];
-
-      // Simulate policy to check access
+      // Try to simulate policy using the principal ARN directly
+      // This works for both IAM users/roles and STS assumed roles
       const simulateCommand = new SimulatePrincipalPolicyCommand({
         PolicySourceArn: request.principal,
         ActionNames: [request.action],
@@ -129,24 +143,77 @@ export class AWSIAMClient {
             reason:
               result.EvalDecision === "allowed"
                 ? "Policy allows access"
-                : "Policy denies access",
-            policies: policyArns,
+                : result.EvalDecisionReason || "Policy denies access",
+            policies: [],
           };
         }
-      } catch (simulateError) {
-        // Fall back to basic policy check
+      } catch (simulateError: any) {
+        // If simulation fails, check if it's a permission issue or invalid principal
+        const errorMessage = simulateError.message || String(simulateError);
+        
+        // For assumed roles, we might not have permission to list policies
+        // but we can still return a decision based on the simulation error
+        if (errorMessage.includes("AccessDenied") || 
+            errorMessage.includes("NoSuchEntity") ||
+            errorMessage.includes("InvalidInput")) {
+          return {
+            allowed: false,
+            reason: `Access denied: ${errorMessage}`,
+          };
+        }
+        
+        // For other errors, fall through to basic check
       }
-      return {
-        allowed: policyArns.length > 0,
-        reason:
-          policyArns.length > 0 ? "Policy attached" : "No policies attached",
-        policies: policyArns,
-      };
-    } catch (error) {
-      console.error("AWS IAM access check error:", error);
+
+      // Fallback: For IAM users (not assumed roles), try to list attached policies
+      if (!isAssumedRole && principalName) {
+        try {
+          const listPoliciesCommand = new ListAttachedUserPoliciesCommand({
+            UserName: principalName,
+          });
+          const policiesResponse = await this.iamClient.send(listPoliciesCommand);
+          const policyArns =
+            policiesResponse.AttachedPolicies?.map((p) => p.PolicyArn || "") || [];
+
+          return {
+            allowed: policyArns.length > 0,
+            reason:
+              policyArns.length > 0 
+                ? "Policy attached (simulation unavailable)" 
+                : "No policies attached",
+            policies: policyArns,
+          };
+        } catch (listError) {
+          // If listing policies fails, return denied
+          return {
+            allowed: false,
+            reason: "Unable to verify access: policy check failed",
+          };
+        }
+      }
+
+      // For assumed roles without simulation results, return denied
       return {
         allowed: false,
-        reason: `IAM check failed: ${error}`,
+        reason: "Unable to verify access for assumed role",
+      };
+    } catch (error: any) {
+      const errorMessage = error.message || String(error);
+      console.error("AWS IAM access check error:", errorMessage);
+      
+      // Provide more specific error messages
+      if (errorMessage.includes("InvalidClientTokenId") || 
+          errorMessage.includes("invalid") ||
+          errorMessage.includes("expired")) {
+        return {
+          allowed: false,
+          reason: "AWS credentials invalid or expired. Please check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file",
+        };
+      }
+      
+      return {
+        allowed: false,
+        reason: `IAM check failed: ${errorMessage}`,
       };
     }
   }
@@ -186,14 +253,30 @@ export class AWSIAMClient {
   }
 
   /**
-   * Extract user name from IAM ARN
-   * @param arn IAM ARN
-   * @returns User name or null
+   * Extract user name or role name from IAM/STS ARN
+   * @param arn IAM/STS ARN
+   * @returns User name, role name, or null
    */
   private extractUserName(arn: string): string | null {
-    // ARN format: arn:aws:iam::account-id:user/username
-    const match = arn.match(/arn:aws:iam::\d+:user\/(.+)/);
-    return match ? match[1] : null;
+    // Handle IAM user ARN: arn:aws:iam::account-id:user/username
+    const userMatch = arn.match(/arn:aws:iam::\d+:user\/(.+)/);
+    if (userMatch) {
+      return userMatch[1];
+    }
+
+    // Handle STS assumed role ARN: arn:aws:sts::account-id:assumed-role/role-name/session-name
+    const roleMatch = arn.match(/arn:aws:sts::\d+:assumed-role\/([^\/]+)\/(.+)/);
+    if (roleMatch) {
+      return roleMatch[1]; // Return role name
+    }
+
+    // Handle IAM role ARN: arn:aws:iam::account-id:role/role-name
+    const iamRoleMatch = arn.match(/arn:aws:iam::\d+:role\/(.+)/);
+    if (iamRoleMatch) {
+      return iamRoleMatch[1];
+    }
+
+    return null;
   }
 
   /**
