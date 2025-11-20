@@ -42,6 +42,26 @@ describe("End-to-End Integration", function () {
     await frostCoordinator.initializeDKG(participantIds);
   });
 
+  async function generateValidSignature(
+    requestId: string,
+    principal: string,
+    resource: string,
+    action: string
+  ) {
+    const wallet = ethers.Wallet.createRandom();
+    const { chainId } = await ethers.provider.getNetwork();
+    const message = ethers.solidityPackedKeccak256(
+      ["bytes32", "address", "bytes32", "bytes32", "uint256"],
+      [requestId, principal, resource, action, chainId]
+    );
+
+    const signature = await wallet.signMessage(ethers.getBytes(message));
+    const sig = ethers.Signature.from(signature);
+    const signature64 = ethers.concat([sig.r, sig.s]);
+    const publicKey = new ethers.SigningKey(wallet.privateKey).compressedPublicKey;
+    return { signature64, publicKey };
+  }
+
   describe("Full Authorization Flow", function () {
     it("Should complete end-to-end authorization flow", async function () {
       const requestId = "test-request-1";
@@ -64,26 +84,26 @@ describe("End-to-End Integration", function () {
 
       // Step 2: Request authorization on-chain
       const requestIdBytes = ethers.id(requestId);
-      const signature = ethers.hexlify(ethers.randomBytes(64)); // Mock signature
-      const publicKey = ethers.hexlify(ethers.randomBytes(33)); // Mock public key
+      const { signature64, publicKey } = await generateValidSignature(
+        requestIdBytes,
+        principal,
+        resource,
+        action
+      );
 
-      // Note: This will fail signature verification, but tests the integration
-      await expect(
-        accessControl.requestAuthorization(
-          requestIdBytes,
-          principal,
-          resource,
-          action,
-          signature,
-          publicKey
-        )
-      ).to.be.revertedWith("AccessControl: invalid FROST signature");
+      const tx = await accessControl.requestAuthorization(
+        requestIdBytes,
+        principal,
+        resource,
+        action,
+        signature64,
+        publicKey
+      );
+      await tx.wait();
 
-      // When transaction reverts, nothing is stored on-chain
-      // So getAuthorization will return default/empty struct
       const authorization = await accessControl.getAuthorization(requestIdBytes);
-      // Request ID will be zero bytes when not stored (transaction reverted)
-      expect(authorization.requestId).to.equal(ethers.ZeroHash);
+      expect(authorization.requestId).to.equal(requestIdBytes);
+      expect(authorization.authorized).to.be.true;
     });
   });
 

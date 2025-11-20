@@ -33,6 +33,25 @@ const frostCoordinator = new FROSTCoordinator(
   parseInt(process.env.FROST_PARTICIPANTS || "5")
 );
 
+const defaultParticipantIds = Array.from(
+  { length: parseInt(process.env.FROST_PARTICIPANTS || "5", 10) },
+  (_, index) => `p${index + 1}`
+);
+
+(async () => {
+  try {
+    await frostCoordinator.initializeDKG(defaultParticipantIds);
+    console.log(
+      `✅ FROST DKG initialized with ${defaultParticipantIds.length} participants`
+    );
+  } catch (error) {
+    console.warn(
+      "⚠️ Unable to initialize FROST DKG automatically. Initialize manually if needed.",
+      error
+    );
+  }
+})();
+
 const awsRegion = process.env.AWS_REGION || "us-east-1";
 const awsIAMClient = new AWSIAMClient(awsRegion);
 

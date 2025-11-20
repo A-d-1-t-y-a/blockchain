@@ -143,7 +143,7 @@ export class AWSIAMClient {
             reason:
               result.EvalDecision === "allowed"
                 ? "Policy allows access"
-                : result.EvalDecisionReason || "Policy denies access",
+                : "Policy denies access",
             policies: [],
           };
         }

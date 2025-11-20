@@ -43,6 +43,26 @@ describe("AccessControlContract", function () {
     );
   });
 
+  async function generateValidSignature(
+    requestId: string,
+    principal: string,
+    resource: string,
+    action: string
+  ) {
+    const wallet = ethers.Wallet.createRandom();
+    const { chainId } = await ethers.provider.getNetwork();
+    const message = ethers.solidityPackedKeccak256(
+      ["bytes32", "address", "bytes32", "bytes32", "uint256"],
+      [requestId, principal, resource, action, chainId]
+    );
+
+    const signature = await wallet.signMessage(ethers.getBytes(message));
+    const sig = ethers.Signature.from(signature);
+    const signature64 = ethers.concat([sig.r, sig.s]);
+    const publicKey = new ethers.SigningKey(wallet.privateKey).compressedPublicKey;
+    return { signature64, publicKey };
+  }
+
   describe("Deployment (TC-SC-AC-001 to TC-SC-AC-002)", function () {
     it("TC-SC-AC-001: Should deploy with correct initial state", async function () {
       expect(await accessControl.thresholdManager()).to.equal(
@@ -79,19 +99,29 @@ describe("AccessControlContract", function () {
       const requestId = ethers.keccak256(ethers.toUtf8Bytes("request1"));
       const resource = ethers.keccak256(ethers.toUtf8Bytes("resource1"));
       const action = ethers.keccak256(ethers.toUtf8Bytes("read"));
-      const signature = ethers.hexlify(ethers.randomBytes(64));
-      const publicKey = ethers.hexlify(ethers.randomBytes(33));
+      const { signature64, publicKey } = await generateValidSignature(
+        requestId,
+        participant1.address,
+        resource,
+        action
+      );
 
-      await expect(
-        accessControl.requestAuthorization(
-          requestId,
-          participant1.address,
-          resource,
-          action,
-          signature,
-          publicKey
-        )
-      ).to.be.revertedWith("AccessControl: invalid FROST signature");
+      const tx = accessControl.requestAuthorization(
+        requestId,
+        participant1.address,
+        resource,
+        action,
+        signature64,
+        publicKey
+      );
+
+      await expect(tx)
+        .to.emit(accessControl, "AuthorizationDecided")
+        .withArgs(requestId, true, signature64);
+
+      const decision = await accessControl.getAuthorization(requestId);
+      expect(decision.requestId).to.equal(requestId);
+      expect(decision.authorized).to.be.true;
     });
 
     it("TC-SC-AC-004: Authorization request with invalid signature should revert", async function () {
@@ -117,7 +147,7 @@ describe("AccessControlContract", function () {
       const requestId = ethers.keccak256(ethers.toUtf8Bytes("request3"));
       const resource = ethers.keccak256(ethers.toUtf8Bytes("resource1"));
       const action = ethers.keccak256(ethers.toUtf8Bytes("read"));
-      const signature = ethers.hexlify(ethers.randomBytes(64));
+      const signature = ethers.hexlify(ethers.randomBytes(32));
       const publicKey = ethers.hexlify(ethers.randomBytes(33));
 
       await expect(
@@ -129,7 +159,7 @@ describe("AccessControlContract", function () {
           signature,
           publicKey
         )
-      ).to.be.revertedWith("AccessControl: invalid FROST signature");
+      ).to.be.revertedWith("FROSTVerifier: invalid signature length");
 
       await expect(
         accessControl.requestAuthorization(
@@ -140,7 +170,7 @@ describe("AccessControlContract", function () {
           signature,
           publicKey
         )
-      ).to.be.revertedWith("AccessControl: invalid FROST signature");
+      ).to.be.revertedWith("FROSTVerifier: invalid signature length");
     });
 
     it("TC-SC-AC-006: Zero address principal rejection", async function () {
@@ -177,8 +207,8 @@ describe("AccessControlContract", function () {
         ethers.keccak256(ethers.toUtf8Bytes("write")),
       ];
       const signatures = [
-        ethers.hexlify(ethers.randomBytes(64)),
-        ethers.hexlify(ethers.randomBytes(64)),
+        ethers.hexlify(ethers.randomBytes(32)),
+        ethers.hexlify(ethers.randomBytes(32)),
       ];
       const publicKeys = [
         ethers.hexlify(ethers.randomBytes(33)),
@@ -194,15 +224,19 @@ describe("AccessControlContract", function () {
           signatures,
           publicKeys
         )
-      ).to.be.revertedWith("AccessControl: invalid FROST signature");
+      ).to.be.revertedWith("FROSTVerifier: invalid signature length");
     });
 
     it("TC-SC-AC-012: Authorization event emission", async function () {
       const requestId = ethers.keccak256(ethers.toUtf8Bytes("event-test"));
       const resource = ethers.keccak256(ethers.toUtf8Bytes("resource1"));
       const action = ethers.keccak256(ethers.toUtf8Bytes("read"));
-      const signature = ethers.hexlify(ethers.randomBytes(64));
-      const publicKey = ethers.hexlify(ethers.randomBytes(33));
+      const { signature64, publicKey } = await generateValidSignature(
+        requestId,
+        participant1.address,
+        resource,
+        action
+      );
 
       await expect(
         accessControl.requestAuthorization(
@@ -210,10 +244,12 @@ describe("AccessControlContract", function () {
           participant1.address,
           resource,
           action,
-          signature,
+          signature64,
           publicKey
         )
-      ).to.be.revertedWith("AccessControl: invalid FROST signature");
+      )
+        .to.emit(accessControl, "AuthorizationDecided")
+        .withArgs(requestId, true, signature64);
     });
   });
 
@@ -279,7 +315,7 @@ describe("AccessControlContract", function () {
       const requestId = ethers.keccak256(ethers.toUtf8Bytes("reentrancy-test"));
       const resource = ethers.keccak256(ethers.toUtf8Bytes("resource1"));
       const action = ethers.keccak256(ethers.toUtf8Bytes("read"));
-      const signature = ethers.hexlify(ethers.randomBytes(64));
+      const signature = ethers.hexlify(ethers.randomBytes(32));
       const publicKey = ethers.hexlify(ethers.randomBytes(33));
 
       await expect(
@@ -291,7 +327,7 @@ describe("AccessControlContract", function () {
           signature,
           publicKey
         )
-      ).to.be.reverted;
+      ).to.be.revertedWith("FROSTVerifier: invalid signature length");
     });
   });
 
