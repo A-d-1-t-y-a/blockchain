@@ -122,7 +122,10 @@ pnpm run deploy:local
 
 ## Documentation
 
+- `COMPLETE_GUIDE.md` - **Complete step-by-step testing and usage guide** (START HERE!)
+- `USAGE_GUIDE.md` - Detailed API usage examples
 - `ARCHITECTURE.md` - System architecture details
+- `TEST_EXECUTION_REPORT.md` - Comprehensive test plan and results
 
 ## License
 

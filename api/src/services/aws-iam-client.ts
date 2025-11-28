@@ -36,24 +36,35 @@ export class AWSIAMClient {
     this.region = region || process.env.AWS_REGION || "us-east-1";
 
     // Use environment variables if available
-    const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
-    const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+    // Try multiple sources: direct env, trimmed, and from .env file
+    let accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+    let secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+
+    // Remove quotes if present (common issue with .env files)
+    if (accessKeyId) {
+      accessKeyId = accessKeyId.trim().replace(/^["']|["']$/g, '');
+    }
+    if (secretAccessKey) {
+      secretAccessKey = secretAccessKey.trim().replace(/^["']|["']$/g, '');
+    }
 
     const clientConfig: any = {
       region: this.region,
     };
 
-    // Only set credentials if both are provided
-    if (accessKeyId && secretAccessKey) {
-      const trimmedKeyId = accessKeyId.trim();
-      const trimmedSecret = secretAccessKey.trim();
-
-      if (trimmedKeyId.length > 0 && trimmedSecret.length > 0) {
-        clientConfig.credentials = {
-          accessKeyId: trimmedKeyId,
-          secretAccessKey: trimmedSecret,
-        };
-      }
+    // Only set credentials if both are provided and not empty
+    if (accessKeyId && secretAccessKey && 
+        accessKeyId.length > 0 && secretAccessKey.length > 0) {
+      clientConfig.credentials = {
+        accessKeyId: accessKeyId,
+        secretAccessKey: secretAccessKey,
+      };
+      
+      // Debug logging (only show first/last chars for security)
+      console.log(`🔐 AWS Credentials loaded: AccessKeyId=${accessKeyId.substring(0, 4)}...${accessKeyId.substring(accessKeyId.length - 4)}, Region=${this.region}`);
+    } else {
+      console.warn("⚠️ AWS credentials not found or incomplete. AWS features will not work.");
+      console.warn("   Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file");
     }
 
     this.iamClient = new IAMClient(clientConfig);
@@ -65,38 +76,72 @@ export class AWSIAMClient {
    */
   async verifyCredentials(): Promise<{ accountId: string; arn: string }> {
     try {
+      // Check if credentials are configured
+      const accessKeyId = process.env.AWS_ACCESS_KEY_ID?.trim().replace(/^["']|["']$/g, '');
+      const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY?.trim().replace(/^["']|["']$/g, '');
+      
+      if (!accessKeyId || !secretAccessKey || accessKeyId.length === 0 || secretAccessKey.length === 0) {
+        throw new Error(
+          `AWS credential verification failed: Credentials not found. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file`
+        );
+      }
+
       const command = new GetCallerIdentityCommand({});
       const response = await this.stsClient.send(command);
+      
+      console.log(`✅ AWS credentials verified: Account=${response.Account}, ARN=${response.Arn}`);
+      
       return {
         accountId: response.Account || "",
         arn: response.Arn || "",
       };
     } catch (error: any) {
       const errorMessage = error.message || String(error);
+      const errorCode = error.Code || error.code || '';
+      
+      // Log the actual error for debugging
+      console.error("❌ AWS credential verification error:", {
+        message: errorMessage,
+        code: errorCode,
+        name: error.name,
+      });
       
       // Provide helpful error messages based on error type
       if (errorMessage.includes("Could not load credentials") || 
-          errorMessage.includes("Missing credentials")) {
+          errorMessage.includes("Missing credentials") ||
+          errorCode === "CredentialsError") {
         throw new Error(
           `AWS credential verification failed: Credentials not found. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file`
         );
       }
       
-      if (errorMessage.includes("InvalidClientTokenId") || 
+      if (errorCode === "InvalidClientTokenId" || 
+          errorMessage.includes("InvalidClientTokenId") || 
           errorMessage.includes("invalid") ||
-          errorMessage.includes("The security token included in the request is invalid")) {
+          errorMessage.includes("The security token included in the request is invalid") ||
+          errorMessage.includes("expired")) {
         throw new Error(
-          `AWS credential verification failed: Invalid or expired credentials. Please check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file and ensure they are valid and not expired`
+          `AWS credential verification failed: Invalid or expired credentials. Please check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file and ensure they are valid and not expired. Make sure there are no extra quotes or spaces.`
         );
       }
       
-      if (errorMessage.includes("SignatureDoesNotMatch")) {
+      if (errorCode === "SignatureDoesNotMatch" || 
+          errorMessage.includes("SignatureDoesNotMatch")) {
         throw new Error(
-          `AWS credential verification failed: Signature mismatch. Please verify AWS_SECRET_ACCESS_KEY is correct`
+          `AWS credential verification failed: Signature mismatch. Please verify AWS_SECRET_ACCESS_KEY is correct and matches the Access Key ID`
         );
       }
       
-      throw new Error(`AWS credential verification failed: ${errorMessage}`);
+      // Network or region errors
+      if (errorMessage.includes("ENOTFOUND") || 
+          errorMessage.includes("getaddrinfo") ||
+          errorMessage.includes("timeout")) {
+        throw new Error(
+          `AWS credential verification failed: Network error. Please check your internet connection and AWS_REGION setting (current: ${this.region})`
+        );
+      }
+      
+      throw new Error(`AWS credential verification failed: ${errorMessage} (Code: ${errorCode})`);
     }
   }
 

@@ -14,7 +14,9 @@ import { FROSTCoordinator } from "./services/frost-coordinator";
 import { AWSIAMClient } from "./services/aws-iam-client";
 import { BlockchainClient } from "./services/blockchain-client";
 
+// Load .env file from multiple possible locations
 dotenv.config({ path: "../.env" });
+dotenv.config({ path: ".env" });
 dotenv.config();
 
 const app = express();
