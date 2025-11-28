@@ -10,10 +10,12 @@ import cors from "cors";
 import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import * as dotenv from "dotenv";
-import { FROSTCoordinator } from "./services/frost-coordinator";
-import { AWSIAMClient } from "./services/aws-iam-client";
-import { AzureIAMClient } from "./services/azure-iam-client";
-import { BlockchainClient } from "./services/blockchain-client";
+import { 
+  FROSTCoordinator, 
+  AWSIAMClient, 
+  AzureIAMClient, 
+  BlockchainClient 
+} from "./services";
 
 // Load .env file from multiple possible locations
 dotenv.config({ path: "../.env" });

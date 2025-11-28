@@ -39,6 +39,7 @@ export class AWSIAMClient {
     // Try multiple sources: direct env, trimmed, and from .env file
     let accessKeyId = process.env.AWS_ACCESS_KEY_ID;
     let secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+    let sessionToken = process.env.AWS_SESSION_TOKEN;
 
     // Remove quotes if present (common issue with .env files)
     if (accessKeyId) {
@@ -46,6 +47,9 @@ export class AWSIAMClient {
     }
     if (secretAccessKey) {
       secretAccessKey = secretAccessKey.trim().replace(/^["']|["']$/g, '');
+    }
+    if (sessionToken) {
+      sessionToken = sessionToken.trim().replace(/^["']|["']$/g, '');
     }
 
     const clientConfig: any = {
@@ -58,13 +62,14 @@ export class AWSIAMClient {
       clientConfig.credentials = {
         accessKeyId: accessKeyId,
         secretAccessKey: secretAccessKey,
+        sessionToken: sessionToken,
       };
       
       // Debug logging (only show first/last chars for security)
-      console.log(`🔐 AWS Credentials loaded: AccessKeyId=${accessKeyId.substring(0, 4)}...${accessKeyId.substring(accessKeyId.length - 4)}, Region=${this.region}`);
+      console.log(`🔐 AWS Credentials loaded: AccessKeyId=${accessKeyId.substring(0, 4)}...${accessKeyId.substring(accessKeyId.length - 4)}, Region=${this.region}, SessionToken=${sessionToken ? "Present" : "None"}`);
     } else {
       console.warn("⚠️ AWS credentials not found or incomplete. AWS features will not work.");
-      console.warn("   Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file");
+      console.warn("   Please set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and optionally AWS_SESSION_TOKEN in .env file");
     }
 
     this.iamClient = new IAMClient(clientConfig);
