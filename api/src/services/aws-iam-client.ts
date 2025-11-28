@@ -23,7 +23,7 @@ export interface AccessRequest {
 
 export interface PolicyDecision {
   allowed: boolean;
-  reason?: string;
+  reason: string;
   policies?: string[];
 }
 

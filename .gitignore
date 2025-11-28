@@ -42,5 +42,8 @@ test-results/
 pnpm-lock.yaml
 
 *.md
-/test
+
+
+*.txt
+
 

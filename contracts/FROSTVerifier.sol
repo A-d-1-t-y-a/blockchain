@@ -1,21 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "./libraries/EllipticCurve.sol";
+
 /**
  * @title FROSTVerifier
  * @dev On-chain FROST threshold signature verification
- * Implements gas-optimized secp256k1 signature verification for FROST signatures
- * 
- * Note: This is a simplified implementation. Full FROST verification requires
- * proper aggregation of threshold shares, which is complex on-chain.
- * For production, consider using a precompiled contract or Layer 2 solution.
+ * Implements Schnorr signature verification over secp256k1
  */
 contract FROSTVerifier {
+    // secp256k1 group order
+    uint256 constant public Q = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+
     /**
-     * @dev Verify a FROST aggregated signature
+     * @dev Verify a FROST aggregated signature (Schnorr)
+     * Signature format: (R_x, R_y, s) where R is the commitment and s is the scalar response
      * @param message Message that was signed
-     * @param signature Aggregated signature (64 bytes: r || s)
-     * @param publicKey Group public key (33 bytes compressed)
+     * @param signature Aggregated signature (96 bytes: R_x || R_y || s)
+     * @param publicKey Group public key (64 bytes: P_x || P_y) - uncompressed
      * @return valid True if signature is valid
      */
     function verifyFROSTSignature(
@@ -23,40 +25,53 @@ contract FROSTVerifier {
         bytes calldata signature,
         bytes calldata publicKey
     ) external pure returns (bool valid) {
-        require(signature.length == 64, "FROSTVerifier: invalid signature length");
-        require(publicKey.length == 33, "FROSTVerifier: invalid public key length");
+        require(signature.length == 96, "FROSTVerifier: invalid signature length");
+        require(publicKey.length == 64, "FROSTVerifier: invalid public key length");
         
-        // Extract r and s from signature
-        bytes32 r;
-        bytes32 s;
+        // Extract R_x, R_y, s from signature
+        uint256 Rx;
+        uint256 Ry;
+        uint256 s;
         
         assembly {
-            r := calldataload(signature.offset)
-            s := calldataload(add(signature.offset, 0x20))
+            Rx := calldataload(signature.offset)
+            Ry := calldataload(add(signature.offset, 0x20))
+            s := calldataload(add(signature.offset, 0x40))
         }
         
-        // Verify signature using ecrecover
-        // Note: This is simplified - full FROST requires proper aggregation verification
-        bytes32 messageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", message));
+        // Extract P_x, P_y from public key
+        uint256 Px;
+        uint256 Py;
         
-        // Extract v (recovery id) - for secp256k1, v is typically 27 or 28
-        // Since we don't have v in the signature, we try both
-        address signer1 = ecrecover(messageHash, 27, r, s);
-        address signer2 = ecrecover(messageHash, 28, r, s);
+        assembly {
+            Px := calldataload(publicKey.offset)
+            Py := calldataload(add(publicKey.offset, 0x20))
+        }
+
+        // Schnorr verification:
+        // e = H(R || P || m)
+        // s * G = R + e * P
         
-        // In full FROST, we would verify against the aggregated group public key
-        // For now, we use a simplified check
-        // Production implementation should use proper secp256k1 verification
+        // 1. Calculate challenge e
+        // We use a specific encoding for the hash: R_x (32) || R_y (32) || P_x (32) || P_y (32) || m (32)
+        bytes32 eHash = keccak256(abi.encodePacked(Rx, Ry, Px, Py, message));
+        uint256 e = uint256(eHash) % Q;
         
-        return (signer1 != address(0)) || (signer2 != address(0));
+        // 2. Calculate s * G
+        (uint256 sGx, uint256 sGy) = EllipticCurve.ecMul(s, EllipticCurve.GX, EllipticCurve.GY);
+        
+        // 3. Calculate e * P
+        (uint256 ePx, uint256 ePy) = EllipticCurve.ecMul(e, Px, Py);
+        
+        // 4. Calculate R + e * P
+        (uint256 RHSx, uint256 RHSy) = EllipticCurve.ecAdd(Rx, Ry, ePx, ePy);
+        
+        // 5. Check if s * G == R + e * P
+        return (sGx == RHSx) && (sGy == RHSy);
     }
 
     /**
-     * @dev Verify multiple FROST signatures in batch (gas optimization)
-     * @param messages Array of messages
-     * @param signatures Array of signatures
-     * @param publicKeys Array of public keys
-     * @return results Array of verification results
+     * @dev Verify multiple FROST signatures in batch
      */
     function verifyBatch(
         bytes32[] calldata messages,
@@ -77,8 +92,6 @@ contract FROSTVerifier {
 
     /**
      * @dev Hash message for FROST signing
-     * @param data Raw message data
-     * @return hash Message hash
      */
     function hashMessage(bytes calldata data) external pure returns (bytes32 hash) {
         return keccak256(data);

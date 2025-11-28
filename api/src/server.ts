@@ -2,7 +2,7 @@
  * API Gateway Server
  *
  * Express.js server for decentralized cloud access control
- * Integrates FROST coordinator, blockchain, and AWS IAM
+ * Integrates FROST coordinator, blockchain, and AWS/Azure IAM
  */
 
 import express, { Request, Response, NextFunction } from "express";
@@ -12,6 +12,7 @@ import { Server as SocketIOServer } from "socket.io";
 import * as dotenv from "dotenv";
 import { FROSTCoordinator } from "./services/frost-coordinator";
 import { AWSIAMClient } from "./services/aws-iam-client";
+import { AzureIAMClient } from "./services/azure-iam-client";
 import { BlockchainClient } from "./services/blockchain-client";
 
 // Load .env file from multiple possible locations
@@ -30,6 +31,7 @@ const io = new SocketIOServer(httpServer, {
 
 app.use(cors());
 app.use(express.json());
+
 const frostCoordinator = new FROSTCoordinator(
   parseInt(process.env.FROST_THRESHOLD || "3"),
   parseInt(process.env.FROST_PARTICIPANTS || "5")
@@ -40,25 +42,13 @@ const defaultParticipantIds = Array.from(
   (_, index) => `p${index + 1}`
 );
 
-(async () => {
-  try {
-    await frostCoordinator.initializeDKG(defaultParticipantIds);
-    console.log(
-      `✅ FROST DKG initialized with ${defaultParticipantIds.length} participants`
-    );
-  } catch (error) {
-    console.warn(
-      "⚠️ Unable to initialize FROST DKG automatically. Initialize manually if needed.",
-      error
-    );
-  }
-})();
-
 const awsRegion = process.env.AWS_REGION || "us-east-1";
 const awsIAMClient = new AWSIAMClient(awsRegion);
+const azureIAMClient = new AzureIAMClient();
 
 let blockchainClient: BlockchainClient | null = null;
 const rpcUrl = process.env.SEPOLIA_RPC_URL || process.env.RPC_URL;
+
 if (
   rpcUrl &&
   process.env.PRIVATE_KEY &&
@@ -84,6 +74,28 @@ if (
   }
 }
 
+// Initialize DKG and register key on blockchain
+(async () => {
+  try {
+    const { groupPublicKey } = await frostCoordinator.initializeDKG(defaultParticipantIds);
+    console.log(
+      `✅ FROST DKG initialized with ${defaultParticipantIds.length} participants`
+    );
+    console.log(`🔑 Group Public Key: ${groupPublicKey}`);
+
+    if (blockchainClient) {
+      console.log("🔄 Registering group public key on-chain...");
+      await blockchainClient.updateGroupPublicKey("0x" + groupPublicKey);
+      console.log("✅ Group public key registered");
+    }
+  } catch (error) {
+    console.warn(
+      "⚠️ Unable to initialize FROST DKG or register key.",
+      error
+    );
+  }
+})();
+
 app.get("/health", async (req: Request, res: Response) => {
   try {
     const health: any = {
@@ -92,6 +104,7 @@ app.get("/health", async (req: Request, res: Response) => {
       services: {
         frost: "operational",
         aws: "unknown",
+        azure: "unknown",
         blockchain: blockchainClient ? "operational" : "not configured",
       },
     };
@@ -104,6 +117,17 @@ app.get("/health", async (req: Request, res: Response) => {
       health.services.awsError = error.message;
     }
 
+    try {
+        // Simple Azure check if configured
+        if (process.env.AZURE_TENANT_ID) {
+             health.services.azure = "operational"; // Simplified check
+        } else {
+            health.services.azure = "not configured";
+        }
+    } catch (error: any) {
+        health.services.azure = "error";
+    }
+
     res.json(health);
   } catch (error: any) {
     res
@@ -114,7 +138,7 @@ app.get("/health", async (req: Request, res: Response) => {
 
 app.post("/api/authorize", async (req: Request, res: Response) => {
   try {
-    const { principal, resource, action, signatureShares } = req.body;
+    const { principal, resource, action, cloudProvider } = req.body;
 
     if (!principal || !resource || !action) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -126,13 +150,17 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
 
     let aggregatedSignature;
     let groupPublicKey;
+    let messageHash;
+
     try {
-      const frostResult = await frostCoordinator.generateThresholdSignature(
-        JSON.stringify({ requestId, principal, resource, action }),
-        signatureShares || []
-      );
+      // Create a JSON string of the request data to sign
+      // Note: In production, this should be canonicalized
+      const requestData = JSON.stringify({ requestId, principal, resource, action });
+      
+      const frostResult = await frostCoordinator.generateThresholdSignature(requestData);
       aggregatedSignature = frostResult.signature;
       groupPublicKey = frostResult.publicKey;
+      messageHash = frostResult.message; // The hash that was signed
     } catch (error: any) {
       return res.status(400).json({
         error: "FROST signature generation failed",
@@ -140,11 +168,14 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
       });
     }
 
-    const awsDecision = await awsIAMClient.checkAccess({
-      principal,
-      resource,
-      action,
-    });
+    // Cloud Provider Check
+    let cloudDecision = { allowed: false, reason: "Unknown provider" };
+    if (cloudProvider === "azure") {
+        cloudDecision = await azureIAMClient.checkAccess({ principal, resource, action });
+    } else {
+        // Default to AWS
+        cloudDecision = await awsIAMClient.checkAccess({ principal, resource, action });
+    }
 
     let blockchainResult = null;
     if (blockchainClient) {
@@ -155,7 +186,6 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
           resource,
           action,
           signature: aggregatedSignature,
-          publicKey: groupPublicKey,
         });
       } catch (error: any) {
         blockchainResult = {
@@ -167,7 +197,8 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
     }
 
     const authorized =
-      awsDecision.allowed && (blockchainResult?.authorized ?? true);
+      cloudDecision.allowed && (blockchainResult?.authorized ?? true);
+      
     io.emit("authorization", {
       requestId,
       principal,
@@ -180,7 +211,7 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
     res.json({
       requestId,
       authorized,
-      awsDecision,
+      cloudDecision,
       blockchainResult,
       timestamp: new Date().toISOString(),
     });

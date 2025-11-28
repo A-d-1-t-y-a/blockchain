@@ -23,6 +23,9 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
     ThresholdManagerContract public thresholdManager;
     FROSTVerifier public frostVerifier;
 
+    // Group Public Key (64 bytes uncompressed: P_x || P_y)
+    bytes public groupPublicKey;
+
     // Policy storage (gas-optimized)
     struct PolicyEntry {
         bytes32 resource;    // Resource identifier
@@ -68,6 +71,7 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
         bytes signature
     );
     event PolicyRootUpdated(bytes32 oldRoot, bytes32 newRoot);
+    event GroupPublicKeyUpdated(bytes oldKey, bytes newKey);
 
     // Modifiers
     modifier onlyAuthorizer() {
@@ -97,13 +101,26 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
+     * @dev Update the group public key (requires admin)
+     * @param _groupPublicKey New group public key (64 bytes)
+     */
+    function updateGroupPublicKey(bytes calldata _groupPublicKey)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        require(_groupPublicKey.length == 64, "AccessControl: invalid public key length");
+        bytes memory oldKey = groupPublicKey;
+        groupPublicKey = _groupPublicKey;
+        emit GroupPublicKeyUpdated(oldKey, _groupPublicKey);
+    }
+
+    /**
      * @dev Internal function to process authorization (without reentrancy guard)
      * @param requestId Unique request identifier
      * @param principal Principal requesting access
      * @param resource Resource identifier
      * @param action Action requested
      * @param signature FROST aggregated signature
-     * @param publicKey Group public key
      * @return authorized True if access is granted
      */
     function _processAuthorization(
@@ -111,12 +128,12 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
         address principal,
         bytes32 resource,
         bytes32 action,
-        bytes calldata signature,
-        bytes calldata publicKey
+        bytes calldata signature
     ) internal returns (bool authorized) {
         require(requestId != bytes32(0), "AccessControl: invalid request ID");
         require(principal != address(0), "AccessControl: zero principal");
         require(authorizations[requestId].requestId == bytes32(0), "AccessControl: duplicate request");
+        require(groupPublicKey.length == 64, "AccessControl: group public key not set");
 
         emit AuthorizationRequested(requestId, principal, resource, action);
 
@@ -125,7 +142,7 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
             abi.encodePacked(requestId, principal, resource, action, block.chainid)
         );
         
-        bool sigValid = frostVerifier.verifyFROSTSignature(message, signature, publicKey);
+        bool sigValid = frostVerifier.verifyFROSTSignature(message, signature, groupPublicKey);
         require(sigValid, "AccessControl: invalid FROST signature");
 
         // Check policy using Merkle proof (proof passed off-chain, verified on-chain)
@@ -146,7 +163,9 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
         });
 
         authorizationIds.push(requestId);
-        totalAuthorizations++;
+        unchecked {
+            totalAuthorizations++;
+        }
 
         emit AuthorizationDecided(requestId, decision, signature);
 
@@ -160,7 +179,6 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
      * @param resource Resource identifier
      * @param action Action requested
      * @param signature FROST aggregated signature
-     * @param publicKey Group public key
      * @return authorized True if access is granted
      */
     function requestAuthorization(
@@ -168,10 +186,9 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
         address principal,
         bytes32 resource,
         bytes32 action,
-        bytes calldata signature,
-        bytes calldata publicKey
+        bytes calldata signature
     ) external nonReentrant whenNotPaused returns (bool authorized) {
-        return _processAuthorization(requestId, principal, resource, action, signature, publicKey);
+        return _processAuthorization(requestId, principal, resource, action, signature);
     }
 
     /**
@@ -196,7 +213,6 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
      * @param resources Array of resources
      * @param actions Array of actions
      * @param signatures Array of signatures
-     * @param publicKeys Array of public keys
      * @return results Array of authorization results
      */
     function batchAuthorize(
@@ -204,29 +220,27 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
         address[] calldata principals,
         bytes32[] calldata resources,
         bytes32[] calldata actions,
-        bytes[] calldata signatures,
-        bytes[] calldata publicKeys
+        bytes[] calldata signatures
     ) external nonReentrant whenNotPaused returns (bool[] memory results) {
         require(
             requestIds.length == principals.length &&
             principals.length == resources.length &&
             resources.length == actions.length &&
-            actions.length == signatures.length &&
-            signatures.length == publicKeys.length,
+            actions.length == signatures.length,
             "AccessControl: array length mismatch"
         );
 
         results = new bool[](requestIds.length);
 
-        for (uint256 i = 0; i < requestIds.length; i++) {
+        for (uint256 i = 0; i < requestIds.length;) {
             results[i] = _processAuthorization(
                 requestIds[i],
                 principals[i],
                 resources[i],
                 actions[i],
-                signatures[i],
-                publicKeys[i]
+                signatures[i]
             );
+            unchecked { ++i; }
         }
     }
 

@@ -9,299 +9,265 @@
  * - Key refresh mechanisms
  */
 
-import * as secp256k1 from "@noble/secp256k1";
+import { Point, CURVE, getPublicKey, utils } from "@noble/secp256k1";
 import { sha256 } from "@noble/hashes/sha256";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 
 export interface Participant {
   id: string;
-  publicKey: string;
-  share?: string; // Secret share (encrypted in production)
+  publicKey: string; // Hex string
+  share?: bigint; // Secret share (kept in memory for MVP simulation)
   isActive: boolean;
 }
 
 export interface ThresholdConfig {
-  threshold: number; // t: minimum signatures required
-  participants: number; // n: total participants
+  threshold: number; // t
+  participants: number; // n
 }
 
 export interface SignatureShare {
   participantId: string;
-  share: string;
-  commitment: string;
+  share: string; // Hex string of s_i
+  commitment: string; // Hex string of R_i
 }
 
 export interface AggregatedSignature {
-  signature: string;
-  publicKey: string;
+  signature: string; // 96 bytes: Rx || Ry || s
+  publicKey: string; // 64 bytes: Px || Py
   message: string;
 }
 
 export class FROSTCoordinator {
   private participants: Map<string, Participant>;
   private threshold: number;
-  private groupPublicKey: string | null = null;
-  private keyShares: Map<string, string> = new Map();
+  private groupPublicKey: Point | null = null;
+  
+  // Polynomial coefficients for DKG (secret)
+  private coefficients: bigint[] = [];
 
   constructor(threshold: number, totalParticipants: number) {
     if (threshold < 1 || threshold > totalParticipants) {
       throw new Error("Threshold must be between 1 and total participants");
     }
-    if (threshold < Math.ceil(totalParticipants / 2)) {
-      throw new Error(
-        "Threshold must be at least majority (n/2 + 1) for security"
-      );
-    }
-
     this.threshold = threshold;
     this.participants = new Map();
   }
 
   /**
    * Initialize Distributed Key Generation (DKG)
-   * In production, this would use a proper DKG protocol
-   * For MVP, we use a simplified trusted dealer approach
+   * Uses a Trusted Dealer approach for MVP.
+   * Generates a secret polynomial f(x) = a_0 + a_1*x + ... + a_{t-1}*x^{t-1}
+   * Group secret key is a_0.
    */
   async initializeDKG(participantIds: string[]): Promise<{
     groupPublicKey: string;
     shares: Map<string, string>;
   }> {
     if (participantIds.length < this.threshold) {
-      throw new Error(
-        `Need at least ${this.threshold} participants for threshold`
-      );
+      throw new Error(`Need at least ${this.threshold} participants`);
     }
 
-    // Generate group key pair (simplified - in production use proper DKG)
-    const privateKey = secp256k1.utils.randomPrivateKey();
-    const publicKey = secp256k1.getPublicKey(privateKey);
-    this.groupPublicKey = Buffer.from(publicKey).toString("hex");
+    // 1. Generate random polynomial coefficients
+    this.coefficients = [];
+    const { randomBytes } = require("ethers");
+    for (let i = 0; i < this.threshold; i++) {
+      const rand = randomBytes(32);
+      this.coefficients.push(BigInt("0x" + Buffer.from(rand).toString("hex")) % CURVE.n);
+    }
 
-    // Generate shares using Shamir Secret Sharing (simplified)
-    // In production, use proper threshold secret sharing
-    const shares = this.generateShares(privateKey, participantIds.length);
+    // Group secret key is the constant term (a_0)
+    const groupSecretKey = this.coefficients[0];
+    this.groupPublicKey = Point.fromPrivateKey(groupSecretKey);
 
+    // 2. Generate shares for each participant
+    // Share y_i = f(i+1)
+    const shares = new Map<string, string>();
+    
     participantIds.forEach((id, index) => {
-      this.keyShares.set(id, shares[index]);
+      const x = BigInt(index + 1);
+      const y = this.evaluatePolynomial(x);
+      
       this.participants.set(id, {
         id,
-        publicKey: this.derivePublicKeyFromShare(shares[index]),
+        publicKey: Point.fromPrivateKey(y).toHex(false), // Uncompressed
+        share: y,
         isActive: true,
       });
+      
+      shares.set(id, y.toString(16));
     });
 
+    // Return 64-byte public key (strip 0x04 prefix from uncompressed 65-byte key)
+    const pubKeyHex = this.groupPublicKey.toHex(false).slice(2);
+
     return {
-      groupPublicKey: this.groupPublicKey,
-      shares: this.keyShares,
+      groupPublicKey: pubKeyHex,
+      shares,
     };
   }
 
   /**
-   * Generate threshold signature shares
-   * Collects shares from participants and aggregates them
+   * Evaluate polynomial at x
+   */
+  private evaluatePolynomial(x: bigint): bigint {
+    let result = 0n;
+    let powerOfX = 1n;
+    
+    for (const coeff of this.coefficients) {
+      result = (result + coeff * powerOfX) % CURVE.n;
+      powerOfX = (powerOfX * x) % CURVE.n;
+    }
+    
+    return result;
+  }
+
+  /**
+   * Generate threshold signature
+   * Simulates the 2-round FROST signing protocol.
    */
   async generateThresholdSignature(
     message: string,
-    signatureShares: SignatureShare[]
+    _providedShares: SignatureShare[] = [] // Ignored in this simulation, we use internal shares
   ): Promise<AggregatedSignature> {
-    if (signatureShares.length < this.threshold) {
-      throw new Error(`Need at least ${this.threshold} signature shares`);
-    }
-
     if (!this.groupPublicKey) {
-      throw new Error("DKG not initialized. Call initializeDKG first");
+      throw new Error("DKG not initialized");
     }
 
-    // Verify all participants are active
-    const activeParticipants = Array.from(this.participants.values()).filter(
-      (p) => p.isActive
-    );
+    const activeParticipants = Array.from(this.participants.values())
+      .filter(p => p.isActive)
+      .slice(0, this.threshold);
 
     if (activeParticipants.length < this.threshold) {
       throw new Error("Not enough active participants");
     }
 
-    // Hash the message
-    const messageHash = sha256(message);
+    // Round 1: Nonce generation
+    // Each participant generates a nonce pair (d_i, e_i) and commitment (D_i, E_i)
+    // For simplified Schnorr: just one nonce k_i and commitment R_i = k_i * G
+    const nonces = new Map<string, bigint>();
+    const commitments = new Map<string, Point>();
 
-    // Aggregate signature shares
-    // In production, use proper FROST aggregation algorithm
-    const aggregatedSignature = this.aggregateSignatures(
-      messageHash,
-      signatureShares.slice(0, this.threshold)
+    for (const p of activeParticipants) {
+      const { randomBytes } = require("ethers");
+      const rand = randomBytes(32);
+      const k = BigInt("0x" + Buffer.from(rand).toString("hex")) % CURVE.n;
+      nonces.set(p.id, k);
+      commitments.set(p.id, Point.fromPrivateKey(k));
+    }
+
+    // Aggregate commitments: R = Sum(R_i)
+    let R = Point.ZERO;
+    for (const comm of commitments.values()) {
+      R = R.add(comm);
+    }
+
+    // Round 2: Signature generation
+    // Challenge e = H(R || P || m)
+    // We need to match the contract's hashing:
+    // keccak256(Rx, Ry, Px, Py, message)
+    
+    // We use ethers for keccak256
+    const { solidityPackedKeccak256 } = require("ethers");
+
+    const Rx = BigInt("0x" + R.toHex(false).slice(2, 66));
+    const Ry = BigInt("0x" + R.toHex(false).slice(66, 130));
+    const Px = BigInt("0x" + this.groupPublicKey.toHex(false).slice(2, 66));
+    const Py = BigInt("0x" + this.groupPublicKey.toHex(false).slice(66, 130));
+    
+    // Hash message if it's not already a hash (assuming it's a string)
+    // The contract expects bytes32 message.
+    // If message is a JSON string, we should hash it first.
+    const messageHash = solidityPackedKeccak256(["string"], [message]);
+
+    const eHash = solidityPackedKeccak256(
+      ["uint256", "uint256", "uint256", "uint256", "bytes32"],
+      [Rx, Ry, Px, Py, messageHash]
+    );
+    
+    const e = BigInt(eHash) % CURVE.n;
+
+    // Calculate signature shares: s_i = k_i + e * x_i * L_i
+    // Where L_i is Lagrange coefficient
+    
+    let s = 0n;
+    
+    // Participant indices (1-based)
+    const participantIndices = activeParticipants.map(p => 
+      BigInt(this.participants.get(p.id)!.id.replace("p", "")) // Assuming id is "p1", "p2"...
     );
 
+    for (let i = 0; i < activeParticipants.length; i++) {
+      const p = activeParticipants[i];
+      const k_i = nonces.get(p.id)!;
+      const x_i = p.share!;
+      const index_i = participantIndices[i];
+
+      // Calculate Lagrange coefficient L_i
+      let num = 1n;
+      let den = 1n;
+      
+      for (let j = 0; j < activeParticipants.length; j++) {
+        if (i === j) continue;
+        const index_j = participantIndices[j];
+        
+        // L_i = Product(j!=i) (0 - x_j) / (x_i - x_j)
+        // We are evaluating at x=0 for the group key
+        
+        num = (num * (0n - index_j)) % CURVE.n;
+        den = (den * (index_i - index_j)) % CURVE.n;
+      }
+      
+      // Modular inverse of denominator
+      // Using Fermat's Little Theorem: a^(p-2) = a^-1 (mod p)
+      const denInv = this.modPow(den, CURVE.n - 2n, CURVE.n);
+      const L_i = (num * denInv) % CURVE.n;
+      
+      // s_i = k_i + e * x_i * L_i
+      const term = (e * x_i * L_i) % CURVE.n;
+      const s_i = (k_i + term) % CURVE.n;
+      
+      s = (s + s_i) % CURVE.n;
+    }
+    
+    // Final signature is (R, s)
+    // Format: Rx (32) || Ry (32) || s (32)
+    
+    const RxHex = R.toHex(false).slice(2, 66);
+    const RyHex = R.toHex(false).slice(66, 130);
+    const sHex = s.toString(16).padStart(64, "0");
+    
+    const signature = RxHex + RyHex + sHex;
+    const publicKey = this.groupPublicKey.toHex(false).slice(2); // 64 bytes
+
     return {
-      signature: aggregatedSignature,
-      publicKey: this.groupPublicKey,
-      message,
+      signature,
+      publicKey,
+      message: messageHash,
     };
   }
 
   /**
-   * Add a new participant (requires key refresh)
+   * Modular exponentiation: base^exp % mod
    */
-  async addParticipant(
-    participantId: string,
-    publicKey: string
-  ): Promise<void> {
-    if (this.participants.has(participantId)) {
-      throw new Error("Participant already exists");
+  private modPow(base: bigint, exp: bigint, mod: bigint): bigint {
+    let result = 1n;
+    base = base % mod;
+    while (exp > 0n) {
+      if (exp % 2n === 1n) result = (result * base) % mod;
+      base = (base * base) % mod;
+      exp /= 2n;
     }
-
-    this.participants.set(participantId, {
-      id: participantId,
-      publicKey,
-      isActive: true,
-    });
-
-    // Trigger key refresh protocol
-    await this.refreshKeys();
+    return result;
   }
 
-  /**
-   * Remove a participant (requires key refresh)
-   */
-  async removeParticipant(participantId: string): Promise<void> {
-    const participant = this.participants.get(participantId);
-    if (!participant) {
-      throw new Error("Participant not found");
-    }
-
-    if (this.participants.size - 1 < this.threshold) {
-      throw new Error(
-        "Cannot remove participant: would violate threshold requirement"
-      );
-    }
-
-    this.participants.delete(participantId);
-    this.keyShares.delete(participantId);
-
-    // Trigger key refresh protocol
-    await this.refreshKeys();
-  }
-
-  /**
-   * Update threshold (requires key refresh)
-   */
-  async updateThreshold(newThreshold: number): Promise<void> {
-    if (newThreshold < 1 || newThreshold > this.participants.size) {
-      throw new Error("Invalid threshold value");
-    }
-
-    if (newThreshold < Math.ceil(this.participants.size / 2)) {
-      throw new Error("Threshold must be at least majority");
-    }
-
-    this.threshold = newThreshold;
-    await this.refreshKeys();
-  }
-
-  /**
-   * Refresh keys without changing the group public key
-   * Implements CHURP (CHUrn-Robust Proactive secret sharing) for key refresh
-   */
-  private async refreshKeys(): Promise<void> {
-    // In production, implement proper CHURP protocol
-    // For MVP, we regenerate shares with same group key
-    const participantIds = Array.from(this.participants.keys());
-
-    if (participantIds.length < this.threshold) {
-      throw new Error("Not enough participants for threshold");
-    }
-  }
-
-  /**
-   * Verify a threshold signature
-   */
-  async verifySignature(
-    signature: string,
-    message: string,
-    publicKey: string
-  ): Promise<boolean> {
-    try {
-      const messageHash = sha256(message);
-      const sigBytes = Buffer.from(signature, "hex");
-      const pubKeyBytes = Buffer.from(publicKey, "hex");
-
-      return secp256k1.verify(sigBytes, messageHash, pubKeyBytes);
-    } catch (error) {
-      console.error("Signature verification error:", error);
-      return false;
-    }
-  }
-
-  /**
-   * Get current threshold configuration
-   */
   getThresholdConfig(): ThresholdConfig {
     return {
       threshold: this.threshold,
-      participants: this.participants.size || 0,
+      participants: this.participants.size,
     };
   }
 
-  /**
-   * Get all active participants
-   */
   getActiveParticipants(): Participant[] {
     return Array.from(this.participants.values()).filter((p) => p.isActive);
-  }
-
-  /**
-   * Generate shares using simplified Shamir Secret Sharing
-   * In production, use proper threshold secret sharing library
-   */
-  private generateShares(secret: Uint8Array, totalShares: number): string[] {
-    // Simplified implementation - in production use proper secret sharing
-    // This is a placeholder that generates deterministic shares
-    const shares: string[] = [];
-    for (let i = 0; i < totalShares; i++) {
-      // In production, use a proper secret sharing library
-      const share = sha256(Buffer.concat([secret, Buffer.from([i])]));
-      shares.push(Buffer.from(share).toString("hex"));
-    }
-    return shares;
-  }
-
-  /**
-   * Derive public key from share (simplified)
-   */
-  private derivePublicKeyFromShare(share: string): string {
-    // In production, properly derive public key from share
-    const shareBytes = Buffer.from(share, "hex");
-    const privateKey = shareBytes.slice(0, 32);
-    if (privateKey.length < 32) {
-      // Pad if needed
-      const padded = Buffer.alloc(32);
-      privateKey.copy(padded, 32 - privateKey.length);
-      const publicKey = secp256k1.getPublicKey(padded);
-      return Buffer.from(publicKey).toString("hex");
-    }
-    const publicKey = secp256k1.getPublicKey(privateKey);
-    return Buffer.from(publicKey).toString("hex");
-  }
-
-  /**
-   * Aggregate signature shares (simplified FROST aggregation)
-   * In production, use proper FROST aggregation algorithm
-   */
-  private aggregateSignatures(
-    messageHash: Uint8Array,
-    shares: SignatureShare[]
-  ): string {
-    // Simplified aggregation - in production use proper FROST algorithm
-    // This combines shares using Lagrange interpolation
-    const aggregated = new Uint8Array(64); // 64 bytes for secp256k1 signature
-
-    // Placeholder aggregation logic
-    // In production, implement proper FROST signature aggregation
-    shares.forEach((share, index) => {
-      const shareBytes = Buffer.from(share.share, "hex");
-      for (let i = 0; i < Math.min(aggregated.length, shareBytes.length); i++) {
-        aggregated[i] = (aggregated[i] + shareBytes[i]) % 256;
-      }
-    });
-
-    return Buffer.from(aggregated).toString("hex");
   }
 }
