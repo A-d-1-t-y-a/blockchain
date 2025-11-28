@@ -21,19 +21,9 @@ library EllipticCurve {
      * @param _pp The modulus
      * @return q such that x*q = 1 (mod pp)
      */
-    function invMod(uint256 _x, uint256 _pp) internal pure returns (uint256) {
+    function invMod(uint256 _x, uint256 _pp) internal view returns (uint256) {
         require(_x != 0 && _x != _pp && _pp != 0, "Invalid number");
-        uint256 q = 0;
-        uint256 newT = 1;
-        uint256 r = _pp;
-        uint256 t;
-        while (_x != 0) {
-            t = r / _x;
-            (q, newT) = (newT, q - t * newT);
-            (r, _x) = (_x, r - t * _x);
-        }
-        if (q < 0) q += _pp;
-        return q;
+        return expMod(_x, _pp - 2, _pp);
     }
 
     /**
@@ -43,15 +33,12 @@ library EllipticCurve {
      * @param _mod Modulus
      * @return res The result
      */
-    function expMod(uint256 _base, uint256 _exp, uint256 _mod) internal pure returns (uint256 res) {
+    function expMod(uint256 _base, uint256 _exp, uint256 _mod) internal view returns (uint256 res) {
         if (_base == 0) return 0;
         if (_exp == 0) return 1;
-        res = 1;
-        while (_exp > 0) {
-            if (_exp % 2 == 1) res = mulmod(res, _base, _mod);
-            _base = mulmod(_base, _base, _mod);
-            _exp /= 2;
-        }
+        (bool success, bytes memory data) = address(0x05).staticcall(abi.encode(32, 32, 32, _base, _exp, _mod));
+        require(success, "expMod failed");
+        res = abi.decode(data, (uint256));
     }
 
     /**
@@ -68,7 +55,7 @@ library EllipticCurve {
         uint256 _y1,
         uint256 _x2,
         uint256 _y2
-    ) internal pure returns (uint256 x, uint256 y) {
+    ) internal view returns (uint256 x, uint256 y) {
         uint256 x1 = _x1;
         uint256 y1 = _y1;
         uint256 x2 = _x2;
@@ -97,7 +84,7 @@ library EllipticCurve {
      * @return x The X coordinate of the result
      * @return y The Y coordinate of the result
      */
-    function ecDouble(uint256 _x, uint256 _y) internal pure returns (uint256 x, uint256 y) {
+    function ecDouble(uint256 _x, uint256 _y) internal view returns (uint256 x, uint256 y) {
         if (_x == 0 && _y == 0) return (0, 0);
 
         uint256 s = mulmod(mulmod(3, mulmod(_x, _x, PP), PP), invMod(mulmod(2, _y, PP), PP), PP);
@@ -117,7 +104,7 @@ library EllipticCurve {
         uint256 _k,
         uint256 _x,
         uint256 _y
-    ) internal pure returns (uint256 x, uint256 y) {
+    ) internal view returns (uint256 x, uint256 y) {
         uint256 k = _k;
         uint256 x1 = _x;
         uint256 y1 = _y;
@@ -141,11 +128,9 @@ library EllipticCurve {
      * @dev Subtraction modulo p
      */
     function submod(uint256 _a, uint256 _b, uint256 _pp) internal pure returns (uint256) {
-        unchecked {
-            if (_a >= _b) {
-                return _a - _b;
-            }
-            return _pp - _b + _a;
+        if (_a >= _b) {
+            return _a - _b;
         }
+        return _pp - (_b - _a);
     }
 }

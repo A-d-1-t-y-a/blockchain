@@ -1,5 +1,4 @@
 import { ethers } from "hardhat";
-import { AccessControlContract, FROSTVerifier, ThresholdManagerContract } from "../typechain-types";
 import * as secp from "@noble/secp256k1";
 
 async function main() {
@@ -54,8 +53,8 @@ async function main() {
   const k = BigInt("0x" + Buffer.from(kBytes).toString("hex")) % N;
   const kHex = k.toString(16).padStart(64, "0");
   
-  const R = secp.Point.fromPrivateKey(kHex);
-  const P = secp.Point.fromPrivateKey(groupPrivHex);
+  const R = secp.Point.fromHex(Buffer.from(secp.getPublicKey(Buffer.from(kHex, "hex"), false)).toString("hex"));
+  const P = secp.Point.fromHex(Buffer.from(secp.getPublicKey(groupPrivateKey, false)).toString("hex"));
   
   const Rx = BigInt("0x" + R.toHex(false).slice(2, 66));
   const Ry = BigInt("0x" + R.toHex(false).slice(66, 130));

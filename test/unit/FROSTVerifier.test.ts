@@ -71,17 +71,48 @@ describe("FROSTVerifier", function () {
   });
 
   it("Should reject invalid signature", async function () {
+    const N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n;
     const privateKeyBytes = ethers.randomBytes(32);
-    const privKeyHex = Buffer.from(privateKeyBytes).toString("hex");
-    const pubKeyUncompressed = secp.getPublicKey(privKeyHex, false);
+    const privKeyInt = BigInt("0x" + Buffer.from(privateKeyBytes).toString("hex")) % N;
+    const privKeyHex = privKeyInt.toString(16).padStart(64, "0");
+    const privateKey = Buffer.from(privKeyHex, "hex");
+    
+    const pubKeyUncompressed = secp.getPublicKey(privateKey, false);
     const pubKey64 = "0x" + Buffer.from(pubKeyUncompressed).toString("hex").slice(2);
     
-    const messageHash = ethers.keccak256(ethers.toUtf8Bytes("Hello"));
-    const validSig = "0x" + "01".repeat(96); 
+    const message = "Hello FROST";
+    const messageHash = ethers.keccak256(ethers.toUtf8Bytes(message));
     
+    // Generate valid signature components
+    const kBytes = ethers.randomBytes(32);
+    const k = BigInt("0x" + Buffer.from(kBytes).toString("hex")) % N;
+    const kHex = k.toString(16).padStart(64, "0");
+    const R = secp.Point.fromHex(Buffer.from(secp.getPublicKey(Buffer.from(kHex, "hex"), false)).toString("hex"));
+    
+    const Rx = BigInt("0x" + R.toHex(false).slice(2, 66));
+    const Ry = BigInt("0x" + R.toHex(false).slice(66, 130));
+    const P = secp.Point.fromHex(Buffer.from(pubKeyUncompressed).toString("hex"));
+    const Px = BigInt("0x" + P.toHex(false).slice(2, 66));
+    const Py = BigInt("0x" + P.toHex(false).slice(66, 130));
+    
+    const eHash = ethers.solidityPackedKeccak256(
+      ["uint256", "uint256", "uint256", "uint256", "bytes32"],
+      [Rx, Ry, Px, Py, messageHash]
+    );
+    const e = BigInt(eHash) % N;
+    const s = (k + e * privKeyInt) % N;
+    
+    // Modify s to be invalid (s + 1)
+    const invalidS = (s + 1n) % N;
+    
+    const invalidSig = "0x" + 
+      Rx.toString(16).padStart(64, "0") + 
+      Ry.toString(16).padStart(64, "0") + 
+      invalidS.toString(16).padStart(64, "0");
+
     const valid = await frostVerifier.verifyFROSTSignature(
       messageHash,
-      validSig,
+      invalidSig,
       pubKey64
     );
 

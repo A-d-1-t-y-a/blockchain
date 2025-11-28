@@ -11,10 +11,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "moduleResolution": "node",
-    "types": ["node", "mocha", "chai"]
+    "moduleResolution": "node"
   },
-  "include": ["./scripts/**/*", "./test/**/*", "./api/**/*"],
+  "include": ["./scripts/**/*", "./test/**/*", "./api/**/*", "./hardhat.config.ts"],
   "exclude": ["node_modules", "dist", "cache", "artifacts"]
 }
 

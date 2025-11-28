@@ -41,7 +41,7 @@ describe("AccessControlContract", function () {
     const groupPrivHex = groupPrivInt.toString(16).padStart(64, "0");
     groupPrivateKey = Buffer.from(groupPrivHex, "hex");
     
-    const pubKeyUncompressed = secp.getPublicKey(groupPrivHex, false);
+    const pubKeyUncompressed = secp.getPublicKey(groupPrivateKey, false);
     groupPublicKey = "0x" + Buffer.from(pubKeyUncompressed).toString("hex").slice(2);
 
     await accessControl.updateGroupPublicKey(groupPublicKey);
@@ -66,10 +66,10 @@ describe("AccessControlContract", function () {
     const k = BigInt("0x" + Buffer.from(kBytes).toString("hex")) % N;
     const kHex = k.toString(16).padStart(64, "0");
     
-    const R = secp.Point.fromPrivateKey(kHex);
+    const R = secp.Point.fromHex(Buffer.from(secp.getPublicKey(Buffer.from(kHex, "hex"), false)).toString("hex"));
     // groupPrivateKey is Uint8Array, convert to hex for Point
     const groupPrivHex = Buffer.from(groupPrivateKey).toString("hex");
-    const P = secp.Point.fromPrivateKey(groupPrivHex);
+    const P = secp.Point.fromHex(Buffer.from(secp.getPublicKey(groupPrivateKey, false)).toString("hex"));
     
     const Rx = BigInt("0x" + R.toHex(false).slice(2, 66));
     const Ry = BigInt("0x" + R.toHex(false).slice(66, 130));

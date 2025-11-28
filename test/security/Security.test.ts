@@ -62,10 +62,10 @@ describe("Security Tests", function () {
     const kBytes = ethers.randomBytes(32);
     const k = BigInt("0x" + Buffer.from(kBytes).toString("hex")) % N;
     const kHex = k.toString(16).padStart(64, "0");
+    const kBuf = Buffer.from(kHex, "hex");
     
-    const R = secp.Point.fromPrivateKey(kHex);
-    const groupPrivHex = Buffer.from(groupPrivateKey).toString("hex");
-    const P = secp.Point.fromPrivateKey(groupPrivHex);
+    const R = secp.Point.fromHex(Buffer.from(secp.getPublicKey(kBuf, false)).toString("hex"));
+    const P = secp.Point.fromHex(Buffer.from(secp.getPublicKey(groupPrivateKey, false)).toString("hex"));
     
     const Rx = BigInt("0x" + R.toHex(false).slice(2, 66));
     const Ry = BigInt("0x" + R.toHex(false).slice(66, 130));
@@ -78,6 +78,7 @@ describe("Security Tests", function () {
     );
     const e = BigInt(eHash) % N;
     
+    const groupPrivHex = Buffer.from(groupPrivateKey).toString("hex");
     const d = BigInt("0x" + groupPrivHex);
     const s = (k + e * d) % N;
     
@@ -114,7 +115,11 @@ describe("Security Tests", function () {
     // ... setup valid signature ...
     // (Simplified for brevity, reusing logic)
     // Here we just check that a modified signature fails
-    const invalidSig = "0x" + "01".repeat(96);
+    // Use s = Q (invalid scalar)
+    const Q = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n;
+    const invalidS = Q.toString(16).padStart(64, "0");
+    const invalidSig = "0x" + "01".repeat(64) + invalidS; // Rx, Ry random, s = Q
+    
     await expect(
       accessControl.requestAuthorization(
         requestId,
@@ -123,6 +128,6 @@ describe("Security Tests", function () {
         ethers.ZeroHash,
         invalidSig
       )
-    ).to.be.revertedWith("AccessControl: invalid FROST signature");
+    ).to.be.revertedWith("FROSTVerifier: invalid scalar");
   });
 });

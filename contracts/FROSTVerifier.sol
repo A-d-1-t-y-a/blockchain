@@ -24,7 +24,7 @@ contract FROSTVerifier {
         bytes32 message,
         bytes calldata signature,
         bytes calldata publicKey
-    ) external pure returns (bool valid) {
+    ) external view returns (bool valid) {
         require(signature.length == 96, "FROSTVerifier: invalid signature length");
         require(publicKey.length == 64, "FROSTVerifier: invalid public key length");
         
@@ -47,6 +47,13 @@ contract FROSTVerifier {
             Px := calldataload(publicKey.offset)
             Py := calldataload(add(publicKey.offset, 0x20))
         }
+
+        // Validate s is within curve order
+        require(s < Q, "FROSTVerifier: invalid scalar");
+        
+        // Validate coordinates are field elements
+        require(Rx < EllipticCurve.PP && Ry < EllipticCurve.PP, "FROSTVerifier: invalid coordinates");
+        require(Px < EllipticCurve.PP && Py < EllipticCurve.PP, "FROSTVerifier: invalid public key");
 
         // Schnorr verification:
         // e = H(R || P || m)
@@ -97,4 +104,3 @@ contract FROSTVerifier {
         return keccak256(data);
     }
 }
-
