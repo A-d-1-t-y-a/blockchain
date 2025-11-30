@@ -174,10 +174,16 @@ export class FROSTCoordinator {
     const Px = BigInt("0x" + this.groupPublicKey.toHex(false).slice(2, 66));
     const Py = BigInt("0x" + this.groupPublicKey.toHex(false).slice(66, 130));
     
-    // Hash message if it's not already a hash (assuming it's a string)
-    // The contract expects bytes32 message.
-    // If message is a JSON string, we should hash it first.
-    const messageHash = solidityPackedKeccak256(["string"], [message]);
+    // If message is already a 32-byte hash (starts with 0x and is 66 chars), use it directly
+    // Otherwise, hash it as a string
+    let messageHash: string;
+    if (message.startsWith("0x") && message.length === 66) {
+      // Already a bytes32 hash
+      messageHash = message;
+    } else {
+      // Hash the string message
+      messageHash = solidityPackedKeccak256(["string"], [message]);
+    }
 
     const eHash = solidityPackedKeccak256(
       ["uint256", "uint256", "uint256", "uint256", "bytes32"],

@@ -49,6 +49,14 @@ export class BlockchainClient {
   }
 
   /**
+   * Get the chain ID
+   */
+  async getChainId(): Promise<bigint> {
+    const network = await this.provider.getNetwork();
+    return network.chainId;
+  }
+
+  /**
    * Submit authorization request to blockchain
    */
   async requestAuthorization(request: AuthorizationRequest): Promise<{
@@ -59,7 +67,7 @@ export class BlockchainClient {
       // Convert strings to bytes32 where needed
       const resourceBytes32 = ethers.keccak256(ethers.toUtf8Bytes(request.resource));
       const actionBytes32 = ethers.keccak256(ethers.toUtf8Bytes(request.action));
-      const requestIdBytes32 = ethers.keccak256(ethers.toUtf8Bytes(request.requestId));
+      const requestIdBytes32 = ethers.id(request.requestId);
       
       // Ensure signature is 0x-prefixed
       const signature = request.signature.startsWith("0x") 
@@ -71,7 +79,10 @@ export class BlockchainClient {
       // Here the API gateway relays it (paying gas)
       const tx = await this.accessControlContract.requestAuthorization(
         requestIdBytes32,
-        request.principal, // Assuming principal is an address, if not need mapping
+        // Map principal string (ARN) to an address if it's not already one
+        ethers.isAddress(request.principal) 
+          ? request.principal 
+          : ethers.getAddress(ethers.keccak256(ethers.toUtf8Bytes(request.principal)).substring(0, 42)),
         resourceBytes32,
         actionBytes32,
         signature

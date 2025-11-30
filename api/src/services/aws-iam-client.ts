@@ -9,6 +9,7 @@ import {
   IAMClient,
   GetUserCommand,
   ListAttachedUserPoliciesCommand,
+  ListAttachedRolePoliciesCommand,
   SimulatePrincipalPolicyCommand,
   AttachUserPolicyCommand,
   DetachUserPolicyCommand,
@@ -157,6 +158,8 @@ export class AWSIAMClient {
    */
   async checkAccess(request: AccessRequest): Promise<PolicyDecision> {
     try {
+      console.log(`🔍 Checking AWS IAM policy for Principal=${request.principal}, Action=${request.action}, Resource=${request.resource}`);
+
       // Check if principal is an STS assumed role
       const isAssumedRole = request.principal.includes(":sts::") && 
                            request.principal.includes(":assumed-role/");
@@ -193,7 +196,7 @@ export class AWSIAMClient {
             reason:
               result.EvalDecision === "allowed"
                 ? "Policy allows access"
-                : "Policy denies access",
+                : `Policy denies access (${result.EvalDecision})`,
             policies: [],
           };
         }
@@ -215,15 +218,26 @@ export class AWSIAMClient {
         // For other errors, fall through to basic check
       }
 
-      // Fallback: For IAM users (not assumed roles), try to list attached policies
+      // Fallback: For IAM users/roles, try to list attached policies
       if (!isAssumedRole && principalName) {
         try {
-          const listPoliciesCommand = new ListAttachedUserPoliciesCommand({
-            UserName: principalName,
-          });
-          const policiesResponse = await this.iamClient.send(listPoliciesCommand);
-          const policyArns =
-            policiesResponse.AttachedPolicies?.map((p) => p.PolicyArn || "") || [];
+          let policyArns: string[] = [];
+          
+          if (request.principal.includes(":role/")) {
+            // It's a role
+            const listPoliciesCommand = new ListAttachedRolePoliciesCommand({
+              RoleName: principalName,
+            });
+            const policiesResponse = await this.iamClient.send(listPoliciesCommand);
+            policyArns = policiesResponse.AttachedPolicies?.map((p) => p.PolicyArn || "") || [];
+          } else {
+            // It's a user
+            const listPoliciesCommand = new ListAttachedUserPoliciesCommand({
+              UserName: principalName,
+            });
+            const policiesResponse = await this.iamClient.send(listPoliciesCommand);
+            policyArns = policiesResponse.AttachedPolicies?.map((p) => p.PolicyArn || "") || [];
+          }
 
           return {
             allowed: policyArns.length > 0,
@@ -233,11 +247,12 @@ export class AWSIAMClient {
                 : "No policies attached",
             policies: policyArns,
           };
-        } catch (listError) {
+        } catch (listError: any) {
+          console.error("Fallback policy check failed:", listError.message);
           // If listing policies fails, return denied
           return {
             allowed: false,
-            reason: "Unable to verify access: policy check failed",
+            reason: `Unable to verify access: policy check failed (${listError.message})`,
           };
         }
       }

@@ -1,23 +1,17 @@
-/**
- * API Gateway Server
- *
- * Express.js server for decentralized cloud access control
- * Integrates FROST coordinator, blockchain, and AWS/Azure IAM
- */
-
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import * as dotenv from "dotenv";
-import { 
-  FROSTCoordinator, 
-  AWSIAMClient, 
-  AzureIAMClient, 
-  BlockchainClient 
+import { ethers } from "ethers";
+import {
+  FROSTCoordinator,
+  AWSIAMClient,
+  AzureIAMClient,
+  BlockchainClient,
 } from "./services";
 
-// Load .env file from multiple possible locations
+// Load environment variables
 dotenv.config({ path: "../.env" });
 dotenv.config({ path: ".env" });
 dotenv.config();
@@ -34,6 +28,7 @@ const io = new SocketIOServer(httpServer, {
 app.use(cors());
 app.use(express.json());
 
+// Initialize FROST coordinator
 const frostCoordinator = new FROSTCoordinator(
   parseInt(process.env.FROST_THRESHOLD || "3"),
   parseInt(process.env.FROST_PARTICIPANTS || "5")
@@ -41,16 +36,17 @@ const frostCoordinator = new FROSTCoordinator(
 
 const defaultParticipantIds = Array.from(
   { length: parseInt(process.env.FROST_PARTICIPANTS || "5", 10) },
-  (_, index) => `p${index + 1}`
+  (_, i) => `p${i + 1}`
 );
 
+// Initialize IAM clients
 const awsRegion = process.env.AWS_REGION || "us-east-1";
 const awsIAMClient = new AWSIAMClient(awsRegion);
 const azureIAMClient = new AzureIAMClient();
 
+// Initialize blockchain client if all required env vars are present
 let blockchainClient: BlockchainClient | null = null;
 const rpcUrl = process.env.SEPOLIA_RPC_URL || process.env.RPC_URL;
-
 if (
   rpcUrl &&
   process.env.PRIVATE_KEY &&
@@ -67,37 +63,33 @@ if (
       process.env.FROST_VERIFIER_ADDRESS
     );
     console.log("✅ Blockchain client initialized");
-  } catch (error: any) {
-    console.warn(
-      "⚠️ Blockchain client initialization failed:",
-      error.message || error
-    );
+  } catch (e: any) {
+    console.warn("⚠️ Blockchain client init failed:", e.message || e);
     blockchainClient = null;
   }
 }
 
-// Initialize DKG and register key on blockchain
+// Register group public key on-chain after DKG initialization
 (async () => {
   try {
-    const { groupPublicKey } = await frostCoordinator.initializeDKG(defaultParticipantIds);
+    const { groupPublicKey } = await frostCoordinator.initializeDKG(
+      defaultParticipantIds
+    );
     console.log(
       `✅ FROST DKG initialized with ${defaultParticipantIds.length} participants`
     );
     console.log(`🔑 Group Public Key: ${groupPublicKey}`);
-
     if (blockchainClient) {
       console.log("🔄 Registering group public key on-chain...");
       await blockchainClient.updateGroupPublicKey("0x" + groupPublicKey);
       console.log("✅ Group public key registered");
     }
-  } catch (error) {
-    console.warn(
-      "⚠️ Unable to initialize FROST DKG or register key.",
-      error
-    );
+  } catch (e: any) {
+    console.warn("⚠️ DKG init or key registration failed:", e);
   }
 })();
 
+// Health check endpoint
 app.get("/health", async (req: Request, res: Response) => {
   try {
     const health: any = {
@@ -110,38 +102,28 @@ app.get("/health", async (req: Request, res: Response) => {
         blockchain: blockchainClient ? "operational" : "not configured",
       },
     };
-
     try {
       await awsIAMClient.verifyCredentials();
       health.services.aws = "operational";
-    } catch (error: any) {
+    } catch (e: any) {
       health.services.aws = "error";
-      health.services.awsError = error.message;
+      health.services.awsError = e.message;
     }
-
-    try {
-        // Simple Azure check if configured
-        if (process.env.AZURE_TENANT_ID) {
-             health.services.azure = "operational"; // Simplified check
-        } else {
-            health.services.azure = "not configured";
-        }
-    } catch (error: any) {
-        health.services.azure = "error";
+    if (process.env.AZURE_TENANT_ID) {
+      health.services.azure = "operational";
+    } else {
+      health.services.azure = "not configured";
     }
-
     res.json(health);
-  } catch (error: any) {
-    res
-      .status(500)
-      .json({ error: "Health check failed", message: error.message });
+  } catch (e: any) {
+    res.status(500).json({ error: "Health check failed", message: e.message });
   }
 });
 
+// Authorization endpoint
 app.post("/api/authorize", async (req: Request, res: Response) => {
   try {
     const { principal, resource, action, cloudProvider } = req.body;
-
     if (!principal || !resource || !action) {
       return res.status(400).json({ error: "Missing required fields" });
     }
@@ -150,57 +132,68 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
       .toString(36)
       .substr(2, 9)}`;
 
-    let aggregatedSignature;
-    let groupPublicKey;
-    let messageHash;
+    // Convert principal (ARN) to a deterministic address if needed
+    const principalAddress = ethers.isAddress(principal)
+      ? principal
+      : ethers.getAddress(
+          ethers.keccak256(ethers.toUtf8Bytes(principal)).substring(0, 42)
+        );
 
-    try {
-      // Create a JSON string of the request data to sign
-      // Note: In production, this should be canonicalized
-      const requestData = JSON.stringify({ requestId, principal, resource, action });
-      
-      const frostResult = await frostCoordinator.generateThresholdSignature(requestData);
-      aggregatedSignature = frostResult.signature;
-      groupPublicKey = frostResult.publicKey;
-      messageHash = frostResult.message; // The hash that was signed
-    } catch (error: any) {
-      return res.status(400).json({
-        error: "FROST signature generation failed",
-        details: error.message,
-      });
-    }
+    // Build the exact tuple that the contract will verify
+    const requestIdBytes32 = ethers.id(requestId);
+    const resourceBytes32 = ethers.keccak256(ethers.toUtf8Bytes(resource));
+    const actionBytes32 = ethers.keccak256(ethers.toUtf8Bytes(action));
 
-    // Cloud Provider Check
-    let cloudDecision = { allowed: false, reason: "Unknown provider" };
-    if (cloudProvider === "azure") {
-        cloudDecision = await azureIAMClient.checkAccess({ principal, resource, action });
-    } else {
-        // Default to AWS
-        cloudDecision = await awsIAMClient.checkAccess({ principal, resource, action });
-    }
+    // Get the chain ID from the blockchain client
+    const chainId = blockchainClient 
+      ? await blockchainClient.getChainId() 
+      : 31337n; // Default to Hardhat's chain ID if no blockchain client
 
-    let blockchainResult = null;
+    // Create the message that the contract expects (packed encoding)
+    // Contract does: keccak256(abi.encodePacked(requestId, principal, resource, action, block.chainid))
+    const message = ethers.solidityPacked(
+      ["bytes32", "address", "bytes32", "bytes32", "uint256"],
+      [requestIdBytes32, principalAddress, resourceBytes32, actionBytes32, chainId]
+    );
+
+    // Hash the message (this is what gets signed)
+    const messageHash = ethers.keccak256(message);
+
+    const frostResult = await frostCoordinator.generateThresholdSignature(
+      messageHash
+    );
+    const aggregatedSignature = frostResult.signature;
+
+    // Cloud IAM decision
+    const cloudDecision =
+      cloudProvider === "azure"
+        ? await azureIAMClient.checkAccess({ principal, resource, action })
+        : await awsIAMClient.checkAccess({ principal, resource, action });
+
+    // Blockchain authorization
+    let blockchainResult: any = null;
     if (blockchainClient) {
       try {
         blockchainResult = await blockchainClient.requestAuthorization({
           requestId,
-          principal,
+          principal: principalAddress,
           resource,
           action,
           signature: aggregatedSignature,
         });
-      } catch (error: any) {
+      } catch (e: any) {
         blockchainResult = {
           requestId,
           authorized: false,
-          error: error.message,
+          error: e.message,
         };
       }
     }
 
     const authorized =
       cloudDecision.allowed && (blockchainResult?.authorized ?? true);
-      
+
+    // Emit via WebSocket
     io.emit("authorization", {
       requestId,
       principal,
@@ -217,75 +210,64 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
       blockchainResult,
       timestamp: new Date().toISOString(),
     });
-  } catch (error: any) {
-    console.error("Authorization error:", error);
-    res
-      .status(500)
-      .json({ error: "Authorization failed", details: error.message });
+  } catch (e: any) {
+    console.error("Authorization error:", e);
+    res.status(500).json({ error: "Authorization failed", details: e.message });
   }
 });
 
+// Retrieve blockchain authorization result by requestId
 app.get("/api/authorize/:requestId", async (req: Request, res: Response) => {
   try {
     const { requestId } = req.params;
-
     if (blockchainClient) {
       const result = await blockchainClient.getAuthorization(requestId);
       return res.json(result);
     }
-
     res.status(404).json({ error: "Blockchain client not configured" });
-  } catch (error: any) {
-    res
-      .status(500)
-      .json({ error: "Failed to get authorization", details: error.message });
+  } catch (e: any) {
+    res.status(500).json({ error: "Failed to get authorization", details: e.message });
   }
 });
 
+// FROST config endpoints
 app.get("/api/frost/config", (req: Request, res: Response) => {
-  const config = frostCoordinator.getThresholdConfig();
-  res.json(config);
+  res.json(frostCoordinator.getThresholdConfig());
 });
-
 app.get("/api/frost/participants", (req: Request, res: Response) => {
-  const participants = frostCoordinator.getActiveParticipants();
-  res.json(participants);
+  res.json(frostCoordinator.getActiveParticipants());
 });
 
+// Update policy root on-chain
 app.post("/api/policy/update-root", async (req: Request, res: Response) => {
   try {
     const { newRoot } = req.body;
-
     if (!newRoot) {
       return res.status(400).json({ error: "Missing newRoot" });
     }
-
     if (!blockchainClient) {
       return res
         .status(500)
         .json({ error: "Blockchain client not configured" });
     }
-
     const txHash = await blockchainClient.updatePolicyRoot(newRoot);
     res.json({ success: true, transactionHash: txHash });
-  } catch (error: any) {
-    res
-      .status(500)
-      .json({ error: "Policy update failed", details: error.message });
+  } catch (e: any) {
+    res.status(500).json({ error: "Policy update failed", details: e.message });
   }
 });
 
+// WebSocket connection handling
 io.on("connection", (socket) => {
   socket.on("subscribe", (data) => {
     socket.join(`authorization:${data.requestId}`);
   });
 });
 
+// Global error handler
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error("Error:", err);
-  res
-    .status(500)
-    .json({ error: "Internal server error", message: err.message });
+  res.status(500).json({ error: "Internal server error", message: err.message });
 });
 
 const PORT = parseInt(process.env.API_PORT || "3000", 10);
@@ -296,13 +278,13 @@ httpServer
     console.log(`✅ WebSocket server: ws://localhost:${PORT}`);
     console.log(`✅ API endpoints: http://localhost:${PORT}/api\n`);
   })
-  .on("error", (error: any) => {
-    if (error.code === "EADDRINUSE") {
+  .on("error", (e: any) => {
+    if (e.code === "EADDRINUSE") {
       console.error(
-        `❌ Port ${PORT} is already in use. Please stop the process using this port or change API_PORT in .env`
+        `❌ Port ${PORT} is already in use. Stop the process or change API_PORT in .env`
       );
     } else {
-      console.error(`❌ Server error:`, error);
+      console.error("❌ Server error:", e);
     }
     process.exit(1);
   });

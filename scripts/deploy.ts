@@ -54,14 +54,24 @@ async function main() {
   const threshold = 3; // t-of-n threshold
   const initialParticipants = [
     process.env.PARTICIPANT1 || deployer.address,
-    process.env.PARTICIPANT2 || deployer.address,
-    process.env.PARTICIPANT3 || deployer.address,
-    process.env.PARTICIPANT4 || deployer.address,
-    process.env.PARTICIPANT5 || deployer.address,
-  ].filter((addr, index, self) => self.indexOf(addr) === index); // Remove duplicates
+    process.env.PARTICIPANT2,
+    process.env.PARTICIPANT3,
+    process.env.PARTICIPANT4,
+    process.env.PARTICIPANT5,
+  ].filter((addr) => addr !== undefined && addr !== "") as string[];
+
+  // Ensure we have at least 5 participants for the threshold of 3
+  // If deploying with a single account, generate random addresses for the rest
+  while (initialParticipants.length < 5) {
+    const randomWallet = ethers.Wallet.createRandom();
+    initialParticipants.push(randomWallet.address);
+  }
+
+  // Remove duplicates just in case
+  const uniqueParticipants = [...new Set(initialParticipants)];
 
   const ThresholdManagerFactory = await ethers.getContractFactory("ThresholdManagerContract");
-  const thresholdManager = await ThresholdManagerFactory.deploy(threshold, initialParticipants);
+  const thresholdManager = await ThresholdManagerFactory.deploy(threshold, uniqueParticipants);
   await thresholdManager.waitForDeployment();
   const thresholdManagerAddress = await thresholdManager.getAddress();
   console.log("ThresholdManagerContract deployed to:", thresholdManagerAddress);
@@ -105,7 +115,7 @@ async function main() {
   console.log("AccessControlContract:", accessControlAddress);
   console.log("\nTo verify contracts on Etherscan, run:");
   console.log(`npx hardhat verify --network sepolia ${frostVerifierAddress}`);
-  console.log(`npx hardhat verify --network sepolia ${thresholdManagerAddress} ${threshold} "[${initialParticipants.join(',')}]"`);
+  console.log(`npx hardhat verify --network sepolia ${thresholdManagerAddress} ${threshold} "[${uniqueParticipants.join(',')}]"`);
   console.log(`npx hardhat verify --network sepolia ${accessControlAddress} ${thresholdManagerAddress} ${frostVerifierAddress} ${initialPolicyRoot}`);
 }
 

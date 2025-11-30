@@ -24,7 +24,7 @@ describe("FROSTVerifier", function () {
     const privKeyHex = privateKey.toString(16).padStart(64, "0");
 
     // Contract expects 64 bytes (uncompressed without prefix)
-    const pubKeyUncompressed = secp.getPublicKey(privKeyHex, false);
+    const pubKeyUncompressed = secp.getPublicKey(Buffer.from(privKeyHex, "hex"), false);
     const pubKey64 = "0x" + Buffer.from(pubKeyUncompressed).toString("hex").slice(2);
 
     // Message to sign
@@ -37,8 +37,8 @@ describe("FROSTVerifier", function () {
     const k = BigInt("0x" + Buffer.from(kBytes).toString("hex")) % N;
     const kHex = k.toString(16).padStart(64, "0");
     
-    const R = secp.Point.fromPrivateKey(kHex);
-    const P = secp.Point.fromPrivateKey(privKeyHex);
+    const R = secp.Point.fromHex(Buffer.from(secp.getPublicKey(Buffer.from(kHex, "hex"), false)).toString("hex"));
+    const P = secp.Point.fromHex(Buffer.from(secp.getPublicKey(Buffer.from(privKeyHex, "hex"), false)).toString("hex"));
     
     const Rx = BigInt("0x" + R.toHex(false).slice(2, 66));
     const Ry = BigInt("0x" + R.toHex(false).slice(66, 130));
