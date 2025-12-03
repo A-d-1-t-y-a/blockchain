@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "compile": "hardhat compile",
-    "test": "hardhat test test/unit/AccessControl.test.ts test/unit/FROSTVerifier.test.ts test/unit/ThresholdManager.test.ts test/unit/FROSTCoordinator.test.ts test/integration/EndToEnd.test.ts test/security/Reentrancy.test.ts",
+    "test": "hardhat test test/unit/AccessControl.test.ts test/unit/FROSTVerifier.test.ts test/unit/ThresholdManager.test.ts test/unit/FROSTCoordinator.test.ts test/integration/EndToEnd.test.ts test/security/Reentrancy.test.ts test/security/BFT.test.ts",
     "test:gas": "REPORT_GAS=true hardhat test",
     "coverage": "hardhat coverage",
     "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia",
@@ -24,7 +24,8 @@
     "test:performance": "mocha test/performance/performance-tests.ts --require ts-node/register --timeout 20000",
     "test:api-suite": "npm run test:api && npm run test:websocket && npm run test:integration && npm run test:security && npm run test:error && npm run test:edge && npm run test:performance",
     "test:all-api": "kill-port 3000 && concurrently -k -s first \"pnpm api:start\" \"wait-on http://localhost:3000/health && npm run test:api-suite\"",
-    "test:all": "npm run test && npm run test:all-api"
+    "test:all": "npm run test && npm run test:all-api",
+    "benchmark": "bash scripts/run-benchmarks.sh"
   },
   "keywords": [],
   "author": "",

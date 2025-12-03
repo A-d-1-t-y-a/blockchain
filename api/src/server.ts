@@ -13,6 +13,7 @@ import * as dotenv from "dotenv";
 import { FROSTCoordinator } from "./services/frost-coordinator";
 import { AWSIAMClient } from "./services/aws-iam-client";
 import { BlockchainClient } from "./services/blockchain-client";
+import { PolicyTreeBuilder, Policy } from "./services/policy-tree-builder";
 
 dotenv.config({ path: "../.env" });
 dotenv.config();
@@ -55,6 +56,24 @@ const defaultParticipantIds = Array.from(
 const awsRegion = process.env.AWS_REGION || "us-east-1";
 const awsIAMClient = new AWSIAMClient(awsRegion);
 
+// Initialize policy tree builder
+const policyTreeBuilder = new PolicyTreeBuilder();
+
+// Add some default policies for testing
+policyTreeBuilder.addPolicies([
+  { resource: "arn:aws:s3:::my-bucket", action: "s3:GetObject", principal: "arn:aws:iam::123456789012:user/testuser", granted: true },
+  { resource: "arn:aws:s3:::my-bucket", action: "s3:PutObject", principal: "arn:aws:iam::123456789012:user/testuser", granted: true },
+  { resource: "arn:aws:ec2:*:*:instance/*", action: "ec2:StartInstances", principal: "arn:aws:iam::123456789012:user/testuser", granted: true },
+]);
+
+// Build initial tree
+try {
+  const root = policyTreeBuilder.buildTree();
+  console.log(`✅ Policy tree initialized with root: ${root.slice(0, 20)}...`);
+} catch (error) {
+  console.warn("⚠️ Policy tree initialization skipped:", error);
+}
+
 let blockchainClient: BlockchainClient | null = null;
 const rpcUrl = process.env.SEPOLIA_RPC_URL || process.env.RPC_URL;
 if (
@@ -65,14 +84,19 @@ if (
   process.env.FROST_VERIFIER_ADDRESS
 ) {
   try {
-    blockchainClient = new BlockchainClient(
-      rpcUrl,
-      process.env.PRIVATE_KEY,
-      process.env.ACCESS_CONTROL_ADDRESS,
-      process.env.THRESHOLD_MANAGER_ADDRESS,
-      process.env.FROST_VERIFIER_ADDRESS
-    );
-    console.log("✅ Blockchain client initialized");
+    // Only initialize if RPC URL is not localhost (unless explicitly configured)
+    if (!rpcUrl.includes('localhost:8545') || process.env.ENABLE_LOCAL_BLOCKCHAIN === 'true') {
+      blockchainClient = new BlockchainClient(
+        rpcUrl,
+        process.env.PRIVATE_KEY,
+        process.env.ACCESS_CONTROL_ADDRESS,
+        process.env.THRESHOLD_MANAGER_ADDRESS,
+        process.env.FROST_VERIFIER_ADDRESS
+      );
+      console.log("✅ Blockchain client initialized");
+    } else {
+      console.log("ℹ️  Blockchain client skipped (localhost:8545 not available)");
+    }
   } catch (error: any) {
     console.warn(
       "⚠️ Blockchain client initialization failed:",
@@ -80,6 +104,8 @@ if (
     );
     blockchainClient = null;
   }
+} else {
+  console.log("ℹ️  Blockchain client not configured (optional)");
 }
 
 app.get("/health", async (req: Request, res: Response) => {
@@ -90,16 +116,31 @@ app.get("/health", async (req: Request, res: Response) => {
       services: {
         frost: "operational",
         aws: "unknown",
-        blockchain: blockchainClient ? "operational" : "not configured",
+        blockchain: "not configured",
       },
     };
 
+    // Check AWS
     try {
       await awsIAMClient.verifyCredentials();
       health.services.aws = "operational";
     } catch (error: any) {
       health.services.aws = "error";
       health.services.awsError = error.message;
+    }
+
+    // Check Blockchain connection
+    if (blockchainClient) {
+      try {
+        const isAvailable = await blockchainClient.isAvailable();
+        health.services.blockchain = isAvailable ? "operational" : "connection failed";
+        if (!isAvailable) {
+          health.services.blockchainError = "Cannot connect to blockchain RPC endpoint";
+        }
+      } catch (error: any) {
+        health.services.blockchain = "error";
+        health.services.blockchainError = error.message;
+      }
     }
 
     res.json(health);
@@ -144,9 +185,18 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
       action,
     });
 
+    // Generate Merkle proof for policy verification
+    let policyProof = null;
+    try {
+      policyProof = policyTreeBuilder.getProof(resource, action, principal, true);
+    } catch (error) {
+      console.warn("Policy proof generation failed:", error);
+    }
+
     let blockchainResult = null;
     if (blockchainClient) {
       try {
+        // Only pass proof if it exists, otherwise pass undefined (will use empty array)
         blockchainResult = await blockchainClient.requestAuthorization({
           requestId,
           principal,
@@ -154,8 +204,15 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
           action,
           signature: aggregatedSignature,
           publicKey: groupPublicKey,
+          proof: policyProof?.proof || undefined, // Explicitly undefined if no proof
+          index: policyProof?.index || undefined, // Explicitly undefined if no proof
         });
       } catch (error: any) {
+        // Silently handle blockchain errors - system works without blockchain
+        // Only log if it's not a connection error (which is expected if no blockchain)
+        if (!error.message?.includes('ECONNREFUSED') && !error.message?.includes('network')) {
+          console.warn("Blockchain authorization error:", error.message);
+        }
         blockchainResult = {
           requestId,
           authorized: false,
@@ -237,6 +294,117 @@ app.post("/api/policy/update-root", async (req: Request, res: Response) => {
     res
       .status(500)
       .json({ error: "Policy update failed", details: error.message });
+  }
+});
+
+// Policy management endpoints
+app.post("/api/policy/add", async (req: Request, res: Response) => {
+  try {
+    const { resource, action, principal, granted } = req.body;
+
+    if (!resource || !action || !principal) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const policy: Policy = {
+      resource,
+      action,
+      principal,
+      granted: granted !== undefined ? granted : true,
+    };
+
+    policyTreeBuilder.addPolicy(policy);
+    const root = policyTreeBuilder.buildTree();
+
+    // Update on-chain if blockchain client is configured
+    if (blockchainClient) {
+      try {
+        await blockchainClient.updatePolicyRoot(root);
+      } catch (error: any) {
+        // Silently handle blockchain errors - system works without blockchain
+        // Only log if it's not a connection error (which is expected if no blockchain)
+        if (!error.message?.includes('ECONNREFUSED') && !error.message?.includes('network')) {
+          console.warn("Failed to update policy root on-chain:", error.message);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      policy,
+      root,
+      message: "Policy added successfully",
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: "Failed to add policy", details: error.message });
+  }
+});
+
+app.get("/api/policy/proof", async (req: Request, res: Response) => {
+  try {
+    const { resource, action, principal, granted } = req.query;
+
+    if (!resource || !action || !principal) {
+      return res.status(400).json({ error: "Missing required parameters" });
+    }
+
+    const proof = policyTreeBuilder.getProof(
+      resource as string,
+      action as string,
+      principal as string,
+      granted === "true" || granted === undefined
+    );
+
+    if (!proof) {
+      return res.status(404).json({ error: "Policy not found" });
+    }
+
+    res.json({
+      proof: proof.proof,
+      index: proof.index,
+      leaf: proof.leaf,
+      resource,
+      action,
+      principal,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: "Failed to generate proof", details: error.message });
+  }
+});
+
+app.get("/api/aws/identity", async (req: Request, res: Response) => {
+  try {
+    const identity = await awsIAMClient.verifyCredentials();
+    res.json({
+      accountId: identity.accountId,
+      arn: identity.arn,
+      region: awsRegion,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: "Failed to get AWS identity",
+      details: error.message,
+    });
+  }
+});
+
+app.get("/api/policy/root", (req: Request, res: Response) => {
+  try {
+    const root = policyTreeBuilder.getRoot();
+    const policies = policyTreeBuilder.getPolicies();
+
+    res.json({
+      root,
+      policyCount: policies.length,
+      policies: policies.map((p) => ({
+        resource: p.resource,
+        action: p.action,
+        principal: p.principal,
+        granted: p.granted,
+      })),
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: "Failed to get policy root", details: error.message });
   }
 });
 

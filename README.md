@@ -11,17 +11,17 @@ cd api && pnpm install
 ```
 
 ### 2. Configure Environment Variables
-Create `.env` file in root directory:
+Create `.env` file in root directory (see `ENV_TEMPLATE.txt`):
 ```env
 # AWS (Required)
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=your_key
 AWS_SECRET_ACCESS_KEY=your_secret
+AWS_SESSION_TOKEN=your_token  # Required for AWS Academy
 
-# Blockchain (Optional - for full functionality)
+# Blockchain (Optional)
 SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_PROJECT_ID
 PRIVATE_KEY=0xYOUR_PRIVATE_KEY
-ETHERSCAN_API_KEY=your_key
 
 # API
 API_PORT=3000
@@ -78,14 +78,14 @@ GET /api/frost/config
 ## Testing
 
 ```bash
-# Run all tests
+# Quick system test
+./test.sh
+
+# Run all unit tests
 pnpm test
 
 # Run with gas reporting
 pnpm run test:gas
-
-# Run specific test
-pnpm exec hardhat test test/unit/AccessControl.test.ts
 ```
 
 ## Deployment

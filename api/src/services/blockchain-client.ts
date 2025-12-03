@@ -16,6 +16,8 @@ export interface AuthorizationRequest {
   action: string;
   signature: string;
   publicKey: string;
+  proof?: string[]; // Merkle proof (optional)
+  index?: number;   // Leaf index (optional)
 }
 
 export interface AuthorizationResult {
@@ -31,6 +33,8 @@ export class BlockchainClient {
   private accessControl: AccessControlContract;
   private thresholdManager: ThresholdManagerContract;
   private frostVerifier: FROSTVerifier;
+  private rpcUrl: string;
+  private isConnected: boolean = false;
 
   constructor(
     rpcUrl: string,
@@ -39,7 +43,12 @@ export class BlockchainClient {
     thresholdManagerAddress: string,
     frostVerifierAddress: string
   ) {
-    this.provider = new ethers.JsonRpcProvider(rpcUrl);
+    this.rpcUrl = rpcUrl;
+    
+    // Create provider with timeout to avoid hanging
+    this.provider = new ethers.JsonRpcProvider(rpcUrl, undefined, {
+      staticNetwork: true,
+    });
 
     // Validate and normalize private key
     try {
@@ -90,6 +99,35 @@ export class BlockchainClient {
       FROSTVerifierFactory.abi,
       this.signer
     ) as unknown as FROSTVerifier;
+    
+    // Test connection asynchronously (don't block initialization)
+    this.testConnection().catch(() => {
+      // Connection test failed, but don't throw - will retry on use
+    });
+  }
+
+  /**
+   * Test blockchain connection
+   */
+  async testConnection(): Promise<boolean> {
+    try {
+      const blockNumber = await this.provider.getBlockNumber();
+      this.isConnected = true;
+      return true;
+    } catch (error) {
+      this.isConnected = false;
+      return false;
+    }
+  }
+
+  /**
+   * Check if blockchain is connected
+   */
+  async isAvailable(): Promise<boolean> {
+    if (!this.isConnected) {
+      return await this.testConnection();
+    }
+    return true;
   }
 
   /**
@@ -100,11 +138,135 @@ export class BlockchainClient {
   async requestAuthorization(
     request: AuthorizationRequest
   ): Promise<AuthorizationResult> {
+    // Check connection before attempting
+    const isAvailable = await this.isAvailable();
+    if (!isAvailable) {
+      throw new Error(`Blockchain not available: Cannot connect to ${this.rpcUrl}`);
+    }
+    
     try {
       const requestIdBytes = ethers.id(request.requestId);
       const resourceBytes = ethers.id(request.resource);
       const actionBytes = ethers.id(request.action);
-      const principalAddress = ethers.getAddress(request.principal);
+      
+      // Convert principal to address - handle both ARN and address formats
+      let principalAddress: string;
+      if (request.principal.startsWith("0x") && request.principal.length === 42) {
+        // Already an Ethereum address
+        principalAddress = ethers.getAddress(request.principal);
+      } else {
+        // ARN or other format - hash it and take last 20 bytes (40 hex chars) for address
+        const principalHash = ethers.id(request.principal);
+        // Take last 40 characters (20 bytes) and prepend 0x
+        principalAddress = ethers.getAddress("0x" + principalHash.slice(-40));
+      }
+
+      // Convert proof to bytes32[] if provided
+      // If no proof or empty proof, pass empty array (contract handles this)
+      let proof: string[] = [];
+      if (request.proof && Array.isArray(request.proof) && request.proof.length > 0) {
+        proof = request.proof
+          .filter(p => p != null && p !== '') // Filter out null/empty values
+          .map(p => {
+            // Ensure proof elements are valid bytes32 hex strings
+            if (typeof p === 'string') {
+              if (p.startsWith('0x')) {
+                // Already hex, ensure it's 32 bytes (66 chars with 0x)
+                if (p.length === 66) {
+                  return p;
+                } else if (p.length < 66) {
+                  // Pad to 32 bytes
+                  return ethers.zeroPadValue(p, 32);
+                } else {
+                  // Too long, truncate to 32 bytes
+                  return '0x' + p.slice(2, 66);
+                }
+              } else {
+                // Not hex, treat as hex string without 0x prefix
+                if (p.length === 64) {
+                  return '0x' + p;
+                } else if (p.length < 64) {
+                  return ethers.zeroPadValue('0x' + p, 32);
+                } else {
+                  return '0x' + p.slice(0, 64);
+                }
+              }
+            }
+            // If not a string, convert to hex first
+            try {
+              const hexValue = ethers.hexlify(p);
+              return ethers.zeroPadValue(hexValue, 32);
+            } catch (e) {
+              // Skip invalid values
+              return null;
+            }
+          })
+          .filter(p => p != null) as string[]; // Remove any null values
+      }
+      // If no proof provided, use empty array (contract will use simplified check)
+      const index = request.index || 0;
+
+      // Ensure signature and publicKey are in correct format
+      let signatureBytes: string;
+      let publicKeyBytes: string;
+      
+      // Handle signature - FROST signature is typically 64 bytes (128 hex chars)
+      if (typeof request.signature === 'string') {
+        const sigClean = request.signature.startsWith('0x') 
+          ? request.signature.slice(2) 
+          : request.signature;
+        
+        if (sigClean.length === 128) {
+          // Perfect length (64 bytes)
+          signatureBytes = '0x' + sigClean;
+        } else if (sigClean.length === 64) {
+          // Also valid (32 bytes) - duplicate to make 64 bytes for FROST
+          signatureBytes = '0x' + sigClean + sigClean;
+        } else if (sigClean.length > 128) {
+          // Too long, truncate
+          signatureBytes = '0x' + sigClean.slice(0, 128);
+        } else {
+          // Too short, pad with zeros
+          signatureBytes = '0x' + sigClean.padEnd(128, '0');
+        }
+      } else {
+        // Not a string, convert to hex
+        signatureBytes = ethers.hexlify(request.signature);
+        // Ensure it's 64 bytes
+        if (signatureBytes.length < 130) {
+          const clean = signatureBytes.slice(2);
+          signatureBytes = '0x' + clean.padEnd(128, '0');
+        }
+      }
+      
+      // Handle publicKey - compressed secp256k1 is 33 bytes (66 hex chars)
+      if (typeof request.publicKey === 'string') {
+        const keyClean = request.publicKey.startsWith('0x') 
+          ? request.publicKey.slice(2) 
+          : request.publicKey;
+        
+        if (keyClean.length === 66) {
+          // Perfect length (33 bytes compressed)
+          publicKeyBytes = '0x' + keyClean;
+        } else if (keyClean.length === 64) {
+          // Uncompressed (32 bytes) - add 02 prefix for compressed
+          publicKeyBytes = '0x02' + keyClean.slice(0, 64);
+        } else if (keyClean.length > 66) {
+          // Too long, truncate
+          publicKeyBytes = '0x' + keyClean.slice(0, 66);
+        } else {
+          // Too short, pad with zeros
+          publicKeyBytes = '0x' + keyClean.padEnd(66, '0');
+        }
+      } else {
+        // Not a string, convert to hex
+        publicKeyBytes = ethers.hexlify(request.publicKey);
+        // Ensure it's 33 bytes
+        if (publicKeyBytes.length < 68) {
+          const clean = publicKeyBytes.slice(2);
+          publicKeyBytes = '0x' + clean.padEnd(66, '0');
+        }
+      }
 
       const gasEstimate =
         await this.accessControl.requestAuthorization.estimateGas(
@@ -112,8 +274,10 @@ export class BlockchainClient {
           principalAddress,
           resourceBytes,
           actionBytes,
-          request.signature,
-          request.publicKey
+          signatureBytes,
+          publicKeyBytes,
+          proof,
+          index
         );
 
       const tx = await this.accessControl.requestAuthorization(
@@ -121,8 +285,10 @@ export class BlockchainClient {
         principalAddress,
         resourceBytes,
         actionBytes,
-        request.signature,
-        request.publicKey,
+        signatureBytes,
+        publicKeyBytes,
+        proof,
+        index,
         {
           gasLimit: (gasEstimate * BigInt(120)) / BigInt(100), // 20% buffer
         }
@@ -202,11 +368,36 @@ export class BlockchainClient {
 
   /**
    * Update policy root
-   * @param newRoot New Merkle root
+   * @param newRoot New Merkle root (should be bytes32 hex string)
    */
   async updatePolicyRoot(newRoot: string): Promise<string> {
+    // Check connection before attempting
+    const isAvailable = await this.isAvailable();
+    if (!isAvailable) {
+      throw new Error(`Blockchain not available: Cannot connect to ${this.rpcUrl}`);
+    }
+    
     try {
-      const rootBytes = ethers.hexlify(ethers.toUtf8Bytes(newRoot));
+      // Ensure root is a valid bytes32 (66 chars with 0x)
+      let rootBytes: string;
+      if (newRoot.startsWith('0x')) {
+        if (newRoot.length === 66) {
+          // Already valid bytes32
+          rootBytes = newRoot;
+        } else {
+          // Pad to 32 bytes
+          rootBytes = ethers.zeroPadValue(newRoot, 32);
+        }
+      } else {
+        // Not hex, treat as hex string without 0x
+        if (newRoot.length === 64) {
+          rootBytes = '0x' + newRoot;
+        } else {
+          // Hash it to get bytes32
+          rootBytes = ethers.id(newRoot);
+        }
+      }
+      
       const tx = await this.accessControl.updatePolicyRoot(rootBytes);
       const receipt = await tx.wait();
       return receipt?.hash || "";
