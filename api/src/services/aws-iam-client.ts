@@ -38,21 +38,28 @@ export class AWSIAMClient {
     // Use environment variables if available
     const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
     const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+    const sessionToken = process.env.AWS_SESSION_TOKEN; // For temporary credentials (AWS Academy, etc.)
 
     const clientConfig: any = {
       region: this.region,
     };
 
-    // Only set credentials if both are provided
+    // Only set credentials if both access key and secret are provided
     if (accessKeyId && secretAccessKey) {
       const trimmedKeyId = accessKeyId.trim();
       const trimmedSecret = secretAccessKey.trim();
+      const trimmedToken = sessionToken ? sessionToken.trim() : undefined;
 
       if (trimmedKeyId.length > 0 && trimmedSecret.length > 0) {
         clientConfig.credentials = {
           accessKeyId: trimmedKeyId,
           secretAccessKey: trimmedSecret,
         };
+        
+        // Add session token if provided (required for temporary credentials like AWS Academy)
+        if (trimmedToken && trimmedToken.length > 0) {
+          clientConfig.credentials.sessionToken = trimmedToken;
+        }
       }
     }
 
@@ -155,7 +162,16 @@ export class AWSIAMClient {
         // but we can still return a decision based on the simulation error
         if (errorMessage.includes("AccessDenied") || 
             errorMessage.includes("NoSuchEntity") ||
-            errorMessage.includes("InvalidInput")) {
+            errorMessage.includes("InvalidInput") ||
+            errorMessage.includes("not authorized")) {
+          // For AWS Academy assumed roles, simulation often fails due to limited permissions
+          // This is expected - the role exists but we can't simulate its policies
+          if (isAssumedRole) {
+            return {
+              allowed: false,
+              reason: "Unable to verify access for assumed role (AWS Academy roles have limited IAM permissions)",
+            };
+          }
           return {
             allowed: false,
             reason: `Access denied: ${errorMessage}`,

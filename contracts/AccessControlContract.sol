@@ -104,6 +104,8 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
      * @param action Action requested
      * @param signature FROST aggregated signature
      * @param publicKey Group public key
+     * @param proof Merkle proof for policy verification (optional - if empty, uses simplified check)
+     * @param index Leaf index in Merkle tree (required if proof is provided)
      * @return authorized True if access is granted
      */
     function _processAuthorization(
@@ -112,7 +114,9 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
         bytes32 resource,
         bytes32 action,
         bytes calldata signature,
-        bytes calldata publicKey
+        bytes calldata publicKey,
+        bytes32[] memory proof,
+        uint256 index
     ) internal returns (bool authorized) {
         require(requestId != bytes32(0), "AccessControl: invalid request ID");
         require(principal != address(0), "AccessControl: zero principal");
@@ -128,9 +132,9 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
         bool sigValid = frostVerifier.verifyFROSTSignature(message, signature, publicKey);
         require(sigValid, "AccessControl: invalid FROST signature");
 
-        // Check policy using Merkle proof (proof passed off-chain, verified on-chain)
-        // For gas optimization, we verify the policy exists in the tree
-        bool policyExists = _checkPolicy(resource, action, principal);
+        // Check policy using Merkle proof if provided, otherwise use simplified check
+        // Split into separate function to avoid stack too deep
+        bool policyExists = _verifyPolicy(resource, action, principal, proof, index);
 
         bool decision = sigValid && policyExists;
 
@@ -161,6 +165,8 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
      * @param action Action requested
      * @param signature FROST aggregated signature
      * @param publicKey Group public key
+     * @param proof Merkle proof for policy verification (optional)
+     * @param index Leaf index in Merkle tree (required if proof is provided)
      * @return authorized True if access is granted
      */
     function requestAuthorization(
@@ -169,9 +175,27 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
         bytes32 resource,
         bytes32 action,
         bytes calldata signature,
+        bytes calldata publicKey,
+        bytes32[] memory proof,
+        uint256 index
+    ) external nonReentrant whenNotPaused returns (bool authorized) {
+        return _processAuthorization(requestId, principal, resource, action, signature, publicKey, proof, index);
+    }
+
+    /**
+     * @dev Request authorization without Merkle proof (backward compatibility)
+     * Uses simplified policy check
+     */
+    function requestAuthorizationSimple(
+        bytes32 requestId,
+        address principal,
+        bytes32 resource,
+        bytes32 action,
+        bytes calldata signature,
         bytes calldata publicKey
     ) external nonReentrant whenNotPaused returns (bool authorized) {
-        return _processAuthorization(requestId, principal, resource, action, signature, publicKey);
+        bytes32[] memory emptyProof;
+        return _processAuthorization(requestId, principal, resource, action, signature, publicKey, emptyProof, 0);
     }
 
     /**
@@ -219,13 +243,16 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
         results = new bool[](requestIds.length);
 
         for (uint256 i = 0; i < requestIds.length; i++) {
+            bytes32[] memory emptyProof;
             results[i] = _processAuthorization(
                 requestIds[i],
                 principals[i],
                 resources[i],
                 actions[i],
                 signatures[i],
-                publicKeys[i]
+                publicKeys[i],
+                emptyProof,
+                0
             );
         }
     }
@@ -258,6 +285,27 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
     }
 
     /**
+     * @dev Verify policy with Merkle proof or simplified check
+     * Split into separate function to avoid stack too deep
+     */
+    function _verifyPolicy(
+        bytes32 resource,
+        bytes32 action,
+        address principal,
+        bytes32[] memory proof,
+        uint256 index
+    ) internal view returns (bool) {
+        if (proof.length > 0) {
+            // Full Merkle proof verification
+            bytes32 leaf = MerkleTree.hashPolicy(resource, action, principal);
+            return MerkleTree.verifyProof(leaf, proof, policyRoot, index);
+        } else {
+            // Simplified check (backward compatibility)
+            return policyRoot != bytes32(0);
+        }
+    }
+
+    /**
      * @dev Check if policy exists (internal)
      * Simplified check - in production, use Merkle proof verification
      */
@@ -268,9 +316,6 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
     ) internal view returns (bool) {
         // For MVP, we do a simplified check
         // In production, this would verify a Merkle proof
-        // bytes32 policyHash = MerkleTree.hashPolicy(resource, action, principal);
-        
-        // In full implementation, verify Merkle proof here
         // For now, return true if policy root is set (simplified)
         return policyRoot != bytes32(0);
     }
