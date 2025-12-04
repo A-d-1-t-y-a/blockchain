@@ -288,6 +288,7 @@ app.post("/api/policy/update-root", async (req: Request, res: Response) => {
         .json({ error: "Blockchain client not configured" });
     }
 
+    
     const txHash = await blockchainClient.updatePolicyRoot(newRoot);
     res.json({ success: true, transactionHash: txHash });
   } catch (error: any) {
