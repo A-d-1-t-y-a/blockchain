@@ -305,20 +305,7 @@ contract AccessControlContract is AccessControl, ReentrancyGuard, Pausable {
         }
     }
 
-    /**
-     * @dev Check if policy exists (internal)
-     * Simplified check - in production, use Merkle proof verification
-     */
-    function _checkPolicy(
-        bytes32 /* resource */,
-        bytes32 /* action */,
-        address /* principal */
-    ) internal view returns (bool) {
-        // For MVP, we do a simplified check
-        // In production, this would verify a Merkle proof
-        // For now, return true if policy root is set (simplified)
-        return policyRoot != bytes32(0);
-    }
+    // Note: _checkPolicy function removed - use _verifyPolicy instead which properly handles Merkle proofs
 
     /**
      * @dev Verify policy with Merkle proof

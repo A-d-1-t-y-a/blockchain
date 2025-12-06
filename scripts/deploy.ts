@@ -52,13 +52,18 @@ async function main() {
   // Deploy Threshold Manager
   console.log("\n2. Deploying ThresholdManagerContract...");
   const threshold = 3; // t-of-n threshold
+  
+  // Get Hardhat test accounts for participants
+  const accounts = await ethers.getSigners();
   const initialParticipants = [
-    process.env.PARTICIPANT1 || deployer.address,
-    process.env.PARTICIPANT2 || deployer.address,
-    process.env.PARTICIPANT3 || deployer.address,
-    process.env.PARTICIPANT4 || deployer.address,
-    process.env.PARTICIPANT5 || deployer.address,
+    process.env.PARTICIPANT1 || accounts[0].address,
+    process.env.PARTICIPANT2 || accounts[1].address,
+    process.env.PARTICIPANT3 || accounts[2].address,
+    process.env.PARTICIPANT4 || accounts[3].address,
+    process.env.PARTICIPANT5 || accounts[4].address,
   ].filter((addr, index, self) => self.indexOf(addr) === index); // Remove duplicates
+  
+  console.log(`Using ${initialParticipants.length} participants for threshold ${threshold}`);
 
   const ThresholdManagerFactory = await ethers.getContractFactory("ThresholdManagerContract");
   const thresholdManager = await ThresholdManagerFactory.deploy(threshold, initialParticipants);
@@ -85,12 +90,13 @@ async function main() {
   if (process.env.DEPLOY_PROXY === "true") {
     console.log("\n4. Deploying Proxy...");
     const ProxyAdminFactory = await ethers.getContractFactory("ProxyAdmin");
-    const proxyAdmin = await ProxyAdminFactory.deploy();
+    const proxyAdmin = await ProxyAdminFactory.deploy(deployer.address);
     await proxyAdmin.waitForDeployment();
     const proxyAdminAddress = await proxyAdmin.getAddress();
     console.log("ProxyAdmin deployed to:", proxyAdminAddress);
 
-    const initData = AccessControlFactory.interface.encodeFunctionData("initialize", []);
+    // AccessControlContract doesn't have initialize function, use empty data
+    const initData = "0x";
     const ProxyFactory = await ethers.getContractFactory("AccessControlProxy");
     const proxy = await ProxyFactory.deploy(accessControlAddress, proxyAdminAddress, initData);
     await proxy.waitForDeployment();
@@ -103,6 +109,40 @@ async function main() {
   console.log("FROSTVerifier:", frostVerifierAddress);
   console.log("ThresholdManagerContract:", thresholdManagerAddress);
   console.log("AccessControlContract:", accessControlAddress);
+  
+  // Update .env file with deployed addresses
+  console.log("\n=== Updating .env file ===");
+  const fs = require('fs');
+  const path = require('path');
+  const envPath = path.join(__dirname, '../.env');
+  
+  try {
+    let envContent = fs.readFileSync(envPath, 'utf8');
+    
+    // Update or add contract addresses
+    const updateEnvVar = (content: string, key: string, value: string): string => {
+      const regex = new RegExp(`^${key}=.*$`, 'm');
+      if (regex.test(content)) {
+        return content.replace(regex, `${key}=${value}`);
+      } else {
+        return content + `\n${key}=${value}`;
+      }
+    };
+    
+    envContent = updateEnvVar(envContent, 'FROST_VERIFIER_ADDRESS', frostVerifierAddress);
+    envContent = updateEnvVar(envContent, 'THRESHOLD_MANAGER_ADDRESS', thresholdManagerAddress);
+    envContent = updateEnvVar(envContent, 'ACCESS_CONTROL_ADDRESS', accessControlAddress);
+    
+    fs.writeFileSync(envPath, envContent);
+    console.log("✓ Contract addresses saved to .env file");
+  } catch (error: any) {
+    console.warn("⚠ Could not update .env file:", error.message);
+    console.log("Please manually add these addresses to your .env file:");
+    console.log(`FROST_VERIFIER_ADDRESS=${frostVerifierAddress}`);
+    console.log(`THRESHOLD_MANAGER_ADDRESS=${thresholdManagerAddress}`);
+    console.log(`ACCESS_CONTROL_ADDRESS=${accessControlAddress}`);
+  }
+  
   console.log("\nTo verify contracts on Etherscan, run:");
   console.log(`npx hardhat verify --network sepolia ${frostVerifierAddress}`);
   console.log(`npx hardhat verify --network sepolia ${thresholdManagerAddress} ${threshold} "[${initialParticipants.join(',')}]"`);
