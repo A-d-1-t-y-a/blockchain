@@ -111,7 +111,7 @@ export class FROSTCoordinator {
    */
   async generateThresholdSignature(
     message: string,
-    signatureShares: SignatureShare[]
+    signatureShares: SignatureShare[] = []
   ): Promise<AggregatedSignature> {
     if (!this.groupPublicKey) {
       throw new Error("DKG not initialized. Call initializeDKG first");

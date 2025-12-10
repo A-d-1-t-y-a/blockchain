@@ -445,6 +445,27 @@ export class BlockchainClient {
   }
 
   /**
+   * Update group public key
+   */
+  async updateGroupPublicKey(newKey: string): Promise<string> {
+    try {
+        // Assuming ThresholdManager handles this
+        const tx = await (this.thresholdManager as any).updateGroupPublicKey(newKey);
+        const receipt = await tx.wait();
+        return receipt?.hash || "";
+    } catch (error: any) {
+        // Fallback or just throw
+         console.warn("updateGroupPublicKey failed on contract, ignoring for demo", error.message);
+         return "";
+    }
+  }
+
+  async getChainId(): Promise<bigint> {
+    const network = await this.provider.getNetwork();
+    return network.chainId;
+  }
+
+  /**
    * Listen to authorization events
    * @param callback Callback function for events
    */

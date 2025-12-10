@@ -20,7 +20,9 @@
   "license": "ISC",
   "dependencies": {
     "@aws-sdk/client-iam": "^3.0.0",
+    "@aws-sdk/client-s3": "^3.948.0",
     "@aws-sdk/client-sts": "^3.0.0",
+    "@aws-sdk/s3-request-presigner": "^3.948.0",
     "@noble/hashes": "^1.0.0",
     "@noble/secp256k1": "^1.0.0",
     "cors": "^2.8.5",
