@@ -1,0 +1,87 @@
+================================================================================
+CODE REPOSITORY EXPLANATION
+================================================================================
+
+1. DIRECTORY STRUCTURE
+-----------------------
+/contracts          -> Solidity Smart Contracts
+  - AccessControlContract.sol  : Main entry point for authorization
+  - FROSTVerifier.sol          : Verifies threshold signatures
+  - ThresholdManagerContract.sol: Manages participants (add/remove)
+  - libraries/MerkleTree.sol   : Efficient policy storage
+
+/api                -> Node.js/TypeScript API Server
+  - src/server.ts             : Main API Gateway (Express)
+  - src/services/             : Core logic
+    - frost-coordinator.ts    : Manages DKG and signing rounds
+    - blockchain-client.ts    : Interacts with smart contracts
+    - aws-iam-client.ts       : Interacts with AWS SDK
+    - s3Uploader.ts           : Handles S3 operations
+
+/scripts            -> Deployment Scripts
+  - deploy.ts                 : Deploys contracts to blockchain
+
+/test               -> Test Suites
+  - unit/                     : Smart contract tests
+  - integration/              : End-to-end system tests
+
+2. KEY LOGIC FLOW
+-----------------------
+When a user requests access:
+
+1. User -> API (/authorize)
+   - API receives request (Principal, Resource, Action)
+
+2. API -> FROST Coordinator
+   - Coordinator initiates signing round
+   - Participants verify policy off-chain
+   - If valid, they contribute partial signatures
+   - Coordinator aggregates into full FROST signature
+
+3. API -> Blockchain
+   - Submits (Request + Signature) to AccessControlContract
+
+4. Smart Contract
+   - Calls FROSTVerifier to check signature
+   - Verifies Merkle Proof for policy
+   - Emits "AuthorizationGranted" event
+
+5. API -> User
+   - Returns "Authorized: True" with Transaction Hash
+
+3. AWS INTEGRATION LOGIC
+-----------------------
+- We use the standard AWS SDK v3
+- AWS credentials are loaded from .env
+- `aws-iam-client.ts` can simulate policies or check user permissions
+- This allows "Hybrid Mode" where we check BOTH Blockchain AND Cloud
+
+4. HOW TO RUN
+-----------------------
+We created 3 PowerShell scripts to automate everything:
+
+1. COMPLETE-SETUP.ps1
+   - Installs dependencies (npm install)
+   - Compiles contracts (npx hardhat compile)
+   - Starts blockchain (npx hardhat node)
+   - Deploys contracts (npx hardhat run scripts/deploy.ts)
+   - Starts API server (npm start)
+
+2. QUICK-START.ps1
+   - Just starts Blockchain and API (skips installation)
+
+3. TEST-SYSTEM.ps1
+   - Runs a full suite of automated tests against the running system
+
+5. CONFIGURATION
+-----------------------
+.env file controls behavior:
+- AUTHORIZATION_MODE: "blockchain-primary", "hybrid", or "cloud-only"
+- THRESHOLD: "3" (for 3-of-5 scheme)
+- AWS credentials and bucket names
+
+6. POSTMAN COLLECTION
+-----------------------
+- Contains 18 pre-configured requests
+- Covers all system functionality
+- Includes automated tests (JavaScript) in the "Tests" tab of each request

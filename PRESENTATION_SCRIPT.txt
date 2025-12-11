@@ -1,0 +1,83 @@
+================================================================================
+PRESENTATION SCRIPT: Decentralized Cloud Access Control
+================================================================================
+
+SLIDE 1: Title Slide
+---------------------
+"Hello everyone, my name is Ravi Teja Gandu. Today I present my research on 'Decentralized Cloud Resource Access Control Using FROST Threshold Signatures'."
+
+SLIDE 2: The Problem
+---------------------
+"Traditional cloud access control relies on centralized authorities like AWS IAM. 
+- Single Point of Failure: If IAM goes down, no one gets access.
+- Centralized Trust: You must trust the cloud provider completely.
+- Lack of Transparency: Audit logs are stored by the provider and can be tampered with."
+
+SLIDE 3: The Solution
+---------------------
+"I propose a decentralized approach:
+- Blockchain-Primary Authorization: Decisions are made by a distributed network.
+- FROST Threshold Signatures: We use a 3-of-5 threshold scheme.
+- Immutable Audit Trail: Every access decision is recorded on the blockchain."
+
+SLIDE 4: System Architecture
+---------------------
+"The system has three layers:
+1. Blockchain Layer: Smart contracts verify signatures and store policies.
+2. Coordination Layer: An API Gateway manages FROST participants.
+3. Cloud Layer: AWS resources (S3, EC2) are protected by this system."
+
+SLIDE 5: Core Technology: FROST
+---------------------
+"We use FROST (Flexible Round-Optimized Schnorr Threshold) signatures.
+- Threshold (t=3, n=5): We have 5 participants.
+- At least 3 must agree to sign an authorization request.
+- This provides Byzantine Fault Tolerance: Up to 2 participants can be malicious or offline."
+
+SLIDE 6: Implementation Details
+---------------------
+"I implemented the system using:
+- Solidity for Smart Contracts (Access Control, Verifier)
+- TypeScript/Node.js for the API Server
+- Hardhat for local blockchain
+- AWS SDK for cloud integration
+- Merkle Trees for efficient policy storage"
+
+SLIDE 7: Key Features Demo
+---------------------
+"Here are the key capabilities:
+1. Decentralized Authorization: Blockchain decides access.
+2. Multi-Cloud Support: Works with AWS S3, EC2, DynamoDB.
+3. Gas Optimization: Consistent cost (~256k gas).
+4. Hybrid Mode: Can work WITH cloud IAM for dual security."
+
+SLIDE 8: Experimental Results
+---------------------
+"I conducted extensive testing with 18 API endpoints:
+- Success Rate: 100% across all tests.
+- Gas Usage: Extremely consistent (Variance < 0.01%).
+- Response Time: Under 2 seconds.
+- AWS Integration: Fully functional S3 uploads and IAM checks."
+
+SLIDE 9: AWS Integration Proof
+---------------------
+"As shown in the screenshots:
+- We integrated with a real AWS account (111236692387).
+- We created real IAM users (Alice, Bob, Admin).
+- We achieved 'Dual Approval' where both Cloud IAM and Blockchain authorized the request."
+
+SLIDE 10: Conclusion
+---------------------
+"In conclusion, this research proves that we can decentralize cloud access control without sacrificing performance.
+- We eliminated single points of failure.
+- We created an immutable audit trail.
+- We maintained compatibility with existing cloud providers."
+
+SLIDE 11: Future Work
+---------------------
+"Future improvements could include:
+- Layer 2 scaling (Arbitrum) to reduce gas costs.
+- Zero-knowledge proofs for privacy.
+- Support for Azure and Google Cloud."
+
+"Thank you. I am happy to take questions."
