@@ -454,9 +454,8 @@ export class BlockchainClient {
         const receipt = await tx.wait();
         return receipt?.hash || "";
     } catch (error: any) {
-        // Fallback or just throw
-         console.warn("updateGroupPublicKey failed on contract, ignoring for demo", error.message);
-         return "";
+        // Function not available in contract - this is expected for demo
+        throw new Error("updateGroupPublicKey not available");
     }
   }
 

@@ -26,7 +26,7 @@ export class S3Uploader {
     this.awsRegion = process.env.AWS_REGION || "us-east-1";
 
     if (!this.awsAccessKeyId || !this.awsSecretAccessKey) {
-      console.warn("⚠️ Warning: AWS credentials are missing from environment variables");
+      console.warn("[WARN] Warning: AWS credentials are missing from environment variables");
     }
 
     this.s3Client = new S3Client({
@@ -52,7 +52,7 @@ export class S3Uploader {
   public async ensureBucketExists(bucket: string): Promise<boolean> {
     try {
       await this.s3Client.send(new HeadBucketCommand({ Bucket: bucket }));
-      console.log(`✅ Bucket exists: ${bucket}`);
+      console.log(`[OK] Bucket exists: ${bucket}`);
       return true;
     } catch (error: any) {
       const statusCode = error?.$metadata?.httpStatusCode;
@@ -61,7 +61,7 @@ export class S3Uploader {
       // Bucket doesn't exist -> Create it
       if (statusCode === 404 || code === "NotFound" || code === "NoSuchBucket") {
         try {
-          console.log(`ℹ️ Bucket ${bucket} not found. Attempting to create...`);
+          console.log(`[INFO] Bucket ${bucket} not found. Attempting to create...`);
             const createBucketParams: any =
             this.awsRegion === "us-east-1"
               ? { Bucket: bucket }
@@ -71,10 +71,10 @@ export class S3Uploader {
                 };
 
           await this.s3Client.send(new CreateBucketCommand(createBucketParams));
-          console.log(`✅ Created new bucket: ${bucket}`);
+          console.log(`[OK] Created new bucket: ${bucket}`);
           return true;
         } catch (createError: any) {
-          console.error(`❌ Failed to create bucket ${bucket}:`, createError.message || createError);
+          console.error(`[ERROR] Failed to create bucket ${bucket}:`, createError.message || createError);
           // In strict mode, we return false if we can't create it
           return false;
         }
@@ -82,11 +82,11 @@ export class S3Uploader {
       
       // Permission issues -> Fail (Strict Reliability)
       if (statusCode === 403 || code === "Forbidden" || code === "AccessDenied") {
-        console.error(`❌ Access Denied checking bucket ${bucket}. Check AWS IAM permissions.`);
+        console.error(`[ERROR] Access Denied checking bucket ${bucket}. Check AWS IAM permissions.`);
         return false;
       }
 
-      console.error(`❌ Error checking bucket ${bucket}:`, error.message || error);
+      console.error(`[ERROR] Error checking bucket ${bucket}:`, error.message || error);
       return false;
     }
   }
@@ -101,7 +101,7 @@ export class S3Uploader {
   ): Promise<boolean> {
     try {
       if (!fs.existsSync(localPath)) {
-        console.error(`❌ Local file not found: ${localPath}`);
+        console.error(`[ERROR] Local file not found: ${localPath}`);
         return false;
       }
 
@@ -123,11 +123,11 @@ export class S3Uploader {
         })
       );
 
-      console.log(`✅ Uploaded to S3: s3://${bucket}/${s3Key}`);
+      console.log(`[OK] Uploaded to S3: s3://${bucket}/${s3Key}`);
       this.uploadHistory.files.push(`s3://${bucket}/${s3Key}`);
       return true;
     } catch (error: any) {
-      console.error(`❌ S3 upload failed for ${s3Key}:`, error.message || error);
+      console.error(`[ERROR] S3 upload failed for ${s3Key}:`, error.message || error);
       return false;
     }
   }

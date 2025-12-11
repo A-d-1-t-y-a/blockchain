@@ -73,9 +73,9 @@ if (
       process.env.THRESHOLD_MANAGER_ADDRESS,
       process.env.FROST_VERIFIER_ADDRESS
     );
-    console.log("✅ Blockchain client initialized");
+    console.log("[OK] Blockchain client initialized");
   } catch (e: any) {
-    console.warn("⚠️ Blockchain client init failed:", e.message || e);
+    console.warn("[WARN] Blockchain client init failed:", e.message || e);
     blockchainClient = null;
   }
 }
@@ -87,16 +87,22 @@ if (
       defaultParticipantIds
     );
     console.log(
-      `✅ FROST DKG initialized with ${defaultParticipantIds.length} participants`
+      `[OK] FROST DKG initialized with ${defaultParticipantIds.length} participants`
     );
-    console.log(`🔑 Group Public Key: ${groupPublicKey}`);
+    console.log(`[KEY] Group Public Key: ${groupPublicKey}`);
+    // Note: Group public key registration on-chain is optional for demo
+    // In production, this would be stored on-chain for verification
     if (blockchainClient) {
-      console.log("🔄 Registering group public key on-chain...");
-      await blockchainClient.updateGroupPublicKey("0x" + groupPublicKey);
-      console.log("✅ Group public key registered");
+      try {
+        console.log("[SYNC] Registering group public key on-chain...");
+        await blockchainClient.updateGroupPublicKey("0x" + groupPublicKey);
+        console.log("[OK] Group public key registered");
+      } catch (e: any) {
+        console.log("[INFO] Group public key registration skipped (function not available in contract)");
+      }
     }
   } catch (e: any) {
-    console.warn("⚠️ DKG init or key registration failed:", e);
+    console.warn("[WARN] DKG init or key registration failed:", e);
   }
 })();
 
@@ -217,7 +223,7 @@ app.post("/api/authorize", async (req: Request, res: Response) => {
         
         // Log when cloud denies but blockchain approves
         if (!cloudDecision.allowed && blockchainResult?.authorized) {
-          console.log(`⚠️  [DECENTRALIZED] Cloud denied but blockchain approved - granting access`);
+          console.log(`[WARN] [DECENTRALIZED] Cloud denied but blockchain approved - granting access`);
         }
         break;
 
@@ -318,7 +324,7 @@ app.post("/api/policy/update-root", async (req: Request, res: Response) => {
 // Method 1: Direct SDK Upload (Standard)
 app.post("/api/s3/upload", async (req: Request, res: Response) => {
   try {
-    console.log("\n🔵 [Endpoint] Testing Direct SDK Upload...");
+    console.log("\n[INFO] [Endpoint] Testing Direct SDK Upload...");
     const { key, content } = req.body;
     
     if (!key || !content) {
@@ -347,14 +353,14 @@ app.post("/api/s3/upload", async (req: Request, res: Response) => {
     );
 
     if (success) {
-      console.log(`✅ Success! Uploaded to s3://${bucket}/${key}`);
+      console.log(`[OK] Success! Uploaded to s3://${bucket}/${key}`);
       return res.json({ success: true, method: 'direct-sdk', bucket, key });
     } else {
-      console.log(`❌ Failed to upload`);
+      console.log(`[ERROR] Failed to upload`);
       return res.status(500).json({ error: "Upload failed" });
     }
   } catch (e: any) {
-    console.error(`❌ Error:`, e.message);
+    console.error(`[ERROR] Error:`, e.message);
     res.status(500).json({ 
       error: "S3 upload failed", 
       details: e.message
@@ -365,7 +371,7 @@ app.post("/api/s3/upload", async (req: Request, res: Response) => {
 // Method 2: Presigned URL Upload
 app.post("/api/s3/presign", async (req: Request, res: Response) => {
   try {
-    console.log("\n🔵 [Endpoint] Generating Presigned URL...");
+    console.log("\n[INFO] [Endpoint] Generating Presigned URL...");
     const { key, expiresIn } = req.body;
     
     if (!key) {
@@ -395,12 +401,26 @@ app.post("/api/s3/presign", async (req: Request, res: Response) => {
       { expiresIn: expiresIn || 900 }
     );
 
-    console.log(`✅ Presigned URL generated`);
+    console.log(`[OK] Presigned URL generated`);
     res.json({ url, key, bucket, method: 'presigned-url', expiresIn: expiresIn || 900 });
   } catch (e: any) {
-    console.error(`❌ Presign Error:`, e.message);
+    console.error(`[ERROR] Presign Error:`, e.message);
     res.status(500).json({ 
       error: "Presign failed", 
+      details: e.message 
+    });
+  }
+});
+
+// AWS Identity endpoint
+app.get("/api/aws/identity", async (req: Request, res: Response) => {
+  try {
+    const identity = await awsIAMClient.verifyCredentials();
+    res.json(identity);
+  } catch (e: any) {
+    console.error("❌ AWS identity check failed:", e.message);
+    res.status(500).json({ 
+      error: "AWS identity check failed", 
       details: e.message 
     });
   }
@@ -409,7 +429,7 @@ app.post("/api/s3/presign", async (req: Request, res: Response) => {
 // List S3 objects
 app.get("/api/s3/list", async (req: Request, res: Response) => {
   try {
-    console.log("\n🔵 Listing S3 bucket contents...");
+    console.log("\n[INFO] Listing S3 bucket contents...");
     const bucket = process.env.S3_BUCKET || "my-student-bucket";
     const uploader = new S3Uploader();
     
@@ -424,10 +444,10 @@ app.get("/api/s3/list", async (req: Request, res: Response) => {
       lastModified: obj.LastModified
     })) || [];
 
-    console.log(`✅ Found ${objects.length} objects in bucket`);
+    console.log(`[OK] Found ${objects.length} objects in bucket`);
     res.json({ bucket, objects, count: objects.length });
   } catch (e: any) {
-    console.error(`❌ List failed:`, e.message);
+    console.error(`[ERROR] List failed:`, e.message);
     res.status(500).json({ error: "List failed", details: e.message });
   }
 });
@@ -448,17 +468,17 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 const PORT = parseInt(process.env.API_PORT || "3000", 10);
 httpServer
   .listen(PORT, () => {
-    console.log(`\n✅ API Gateway server running on port ${PORT}`);
-    console.log(`🔐 Authorization Mode: ${AUTHORIZATION_MODE.toUpperCase()}`);
-    console.log(`✅ Health check: http://localhost:${PORT}/health`);
-    console.log(`✅ WebSocket server: ws://localhost:${PORT}`);
-    console.log(`✅ API endpoints: http://localhost:${PORT}/api\n`);
+    console.log(`\n[OK] API Gateway server running on port ${PORT}`);
+    console.log(`[SECURE] Authorization Mode: ${AUTHORIZATION_MODE.toUpperCase()}`);
+    console.log(`[OK] Health check: http://localhost:${PORT}/health`);
+    console.log(`[OK] WebSocket server: ws://localhost:${PORT}`);
+    console.log(`[OK] API endpoints: http://localhost:${PORT}/api\n`);
   })
   .on("error", (e: any) => {
     if (e.code === "EADDRINUSE") {
-      console.error(`❌ Port ${PORT} is already in use.`);
+      console.error(`[ERROR] Port ${PORT} is already in use.`);
     } else {
-      console.error("❌ Server error:", e);
+      console.error("[ERROR] Server error:", e);
     }
     process.exit(1);
   });
