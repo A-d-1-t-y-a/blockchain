@@ -431,6 +431,18 @@ app.get("/api/s3/list", async (req: Request, res: Response) => {
   try {
     console.log("\n[INFO] Listing S3 bucket contents...");
     const bucket = process.env.S3_BUCKET || "my-student-bucket";
+    
+    // Check if AWS credentials are configured
+    if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+      console.log("[INFO] AWS credentials not configured - S3 list unavailable");
+      return res.json({ 
+        bucket, 
+        objects: [], 
+        count: 0,
+        message: "AWS credentials not configured. S3 operations are optional for core authorization functionality."
+      });
+    }
+    
     const uploader = new S3Uploader();
     
     // We access s3Client directly for listing as S3Uploader doesn't expose it wrapper yet
@@ -447,6 +459,16 @@ app.get("/api/s3/list", async (req: Request, res: Response) => {
     console.log(`[OK] Found ${objects.length} objects in bucket`);
     res.json({ bucket, objects, count: objects.length });
   } catch (e: any) {
+    // Don't log error for Access Denied - it's expected without proper IAM permissions
+    if (e.message?.includes("Access Denied") || e.message?.includes("InvalidAccessKeyId")) {
+      console.log(`[INFO] S3 list unavailable - AWS IAM permissions needed (optional feature)`);
+      return res.json({ 
+        bucket: process.env.S3_BUCKET || "my-student-bucket", 
+        objects: [], 
+        count: 0,
+        message: "S3 list requires AWS IAM permissions. Core authorization system works independently."
+      });
+    }
     console.error(`[ERROR] List failed:`, e.message);
     res.status(500).json({ error: "List failed", details: e.message });
   }

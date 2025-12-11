@@ -1,0 +1,836 @@
+{
+	"info": {
+		"_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		"name": "Decentralized Cloud Access Control - Research Project",
+		"description": "Complete API collection for testing blockchain-based decentralized access control system with FROST threshold cryptography.\n\nAuthor: Ravi Teja Gandu (x24111490)\nProject: Research in Computing CA2\nInstitution: National College of Ireland",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. System Health & Configuration",
+			"item": [
+				{
+					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"System is healthy\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql(\"healthy\");",
+									"});",
+									"",
+									"pm.test(\"FROST service is operational\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.services.frost).to.eql(\"operational\");",
+									"});",
+									"",
+									"pm.test(\"Blockchain service is operational\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.services.blockchain).to.eql(\"operational\");",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/health",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"health"
+							]
+						},
+						"description": "Check the health status of all system services including FROST, AWS, Azure, and Blockchain."
+					},
+					"response": []
+				},
+				{
+					"name": "FROST Configuration",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Threshold is 3\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.threshold).to.eql(3);",
+									"});",
+									"",
+									"pm.test(\"Total participants is 5\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.participants).to.eql(5);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/frost/config",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"frost",
+								"config"
+							]
+						},
+						"description": "Get FROST threshold signature configuration showing 3-of-5 threshold setup."
+					},
+					"response": []
+				},
+				{
+					"name": "FROST Participants",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Has 5 participants\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.length).to.eql(5);",
+									"});",
+									"",
+									"pm.test(\"All participants are active\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    jsonData.forEach(function(participant) {",
+									"        pm.expect(participant.isActive).to.be.true;",
+									"    });",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/frost/participants",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"frost",
+								"participants"
+							]
+						},
+						"description": "List all active FROST threshold signature participants."
+					},
+					"response": []
+				}
+			],
+			"description": "System health checks and FROST threshold cryptography configuration endpoints."
+		},
+		{
+			"name": "2. Authorization Operations",
+			"item": [
+				{
+					"name": "Authorization - READ Operation",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Authorization granted\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.authorized).to.be.true;",
+									"});",
+									"",
+									"pm.test(\"Blockchain transaction created\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.blockchainResult.transactionHash).to.exist;",
+									"});",
+									"",
+									"pm.test(\"Gas usage is reasonable\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.blockchainResult.gasUsed).to.be.below(300000);",
+									"});",
+									"",
+									"// Save requestId for later retrieval",
+									"var jsonData = pm.response.json();",
+									"pm.environment.set(\"lastRequestId\", jsonData.requestId);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"principal\": \"arn:aws:iam::111236692387:user/alice\",\n  \"resource\": \"s3://raviteja-access-control/confidential-data.txt\",\n  \"action\": \"read\",\n  \"cloudProvider\": \"aws\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/authorize",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"authorize"
+							]
+						},
+						"description": "Request authorization for S3 READ operation. Demonstrates blockchain-primary mode where blockchain approves access."
+					},
+					"response": []
+				},
+				{
+					"name": "Authorization - WRITE Operation",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Authorization granted\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.authorized).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"principal\": \"arn:aws:iam::111236692387:user/bob\",\n  \"resource\": \"s3://raviteja-access-control/important-file.pdf\",\n  \"action\": \"write\",\n  \"cloudProvider\": \"aws\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/authorize",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"authorize"
+							]
+						},
+						"description": "Request authorization for S3 WRITE operation."
+					},
+					"response": []
+				},
+				{
+					"name": "Authorization - DELETE Operation",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Authorization granted\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.authorized).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"principal\": \"arn:aws:iam::111236692387:user/admin\",\n  \"resource\": \"s3://raviteja-access-control/old-data.txt\",\n  \"action\": \"delete\",\n  \"cloudProvider\": \"aws\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/authorize",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"authorize"
+							]
+						},
+						"description": "Request authorization for S3 DELETE operation."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Authorization by Request ID",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Authorization decision exists\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.requestId).to.exist;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/authorize/{{lastRequestId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"authorize",
+								"{{lastRequestId}}"
+							]
+						},
+						"description": "Retrieve a previously made authorization decision by its request ID."
+					},
+					"response": []
+				}
+			],
+			"description": "Authorization request endpoints demonstrating blockchain-based access control with FROST signatures."
+		},
+		{
+			"name": "3. AWS Integration",
+			"item": [
+				{
+					"name": "AWS Identity Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"AWS account ID exists\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.accountId).to.exist;",
+									"});",
+									"",
+									"pm.test(\"AWS ARN exists\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.arn).to.exist;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/aws/identity",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"aws",
+								"identity"
+							]
+						},
+						"description": "Verify AWS credentials and get caller identity information."
+					},
+					"response": []
+				}
+			],
+			"description": "AWS cloud integration endpoints for identity verification."
+		},
+		{
+			"name": "4. S3 Operations",
+			"item": [
+				{
+					"name": "S3 Upload - Direct SDK",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Upload successful\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"});",
+									"",
+									"pm.test(\"Correct bucket\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.bucket).to.eql(\"raviteja-demo-bucket-2025\");",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"key\": \"postman-test/demo-upload.txt\",\n  \"content\": \"SGVsbG8gZnJvbSBQb3N0bWFuISBUaGlzIGlzIGEgdGVzdCBmaWxlIGZvciBkZWNlbnRyYWxpemVkIGFjY2VzcyBjb250cm9sIHN5c3RlbS4=\",\n  \"bucket\": \"raviteja-access-control\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/s3/upload",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"s3",
+								"upload"
+							]
+						},
+						"description": "Upload a file to S3 bucket using direct SDK method. Content is base64 encoded: 'Hello from Postman! This is a test file for decentralized access control system.'"
+					},
+					"response": []
+				},
+				{
+					"name": "S3 Generate Presigned URL",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Presigned URL generated\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.url).to.exist;",
+									"    pm.expect(jsonData.url).to.include(\"s3\");",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"key\": \"presigned-uploads/test-file.txt\",\n  \"expiresIn\": 900\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/s3/presign",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"s3",
+								"presign"
+							]
+						},
+						"description": "Generate a presigned URL for S3 upload (valid for 15 minutes)."
+					},
+					"response": []
+				},
+				{
+					"name": "S3 List Objects",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Bucket name is correct\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.bucket).to.exist;",
+									"});",
+									"",
+									"pm.test(\"Objects array exists\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.objects).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/s3/list",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"s3",
+								"list"
+							]
+						},
+						"description": "List all objects in the S3 bucket."
+					},
+					"response": []
+				}
+			],
+			"description": "S3 file operations including upload, presigned URLs, and listing objects."
+		},
+		{
+			"name": "5. Policy Management",
+			"item": [
+				{
+					"name": "Update Policy Root",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Policy update successful\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"});",
+									"",
+									"pm.test(\"Transaction hash exists\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.transactionHash).to.exist;",
+									"    pm.expect(jsonData.transactionHash).to.match(/^0x[a-fA-F0-9]{64}$/);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"newRoot\": \"0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/policy/update-root",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"policy",
+								"update-root"
+							]
+						},
+						"description": "Update the Merkle tree policy root on the blockchain."
+					},
+					"response": []
+				}
+			],
+			"description": "Policy management endpoints for updating access control policies."
+		},
+		{
+			"name": "6. Advanced Testing",
+			"item": [
+				{
+					"name": "Multi-User - Alice (Read)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"principal\": \"arn:aws:iam::111236692387:user/alice\",\n  \"resource\": \"s3://raviteja-access-control/project-data/report.pdf\",\n  \"action\": \"read\",\n  \"cloudProvider\": \"aws\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/authorize",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"authorize"
+							]
+						},
+						"description": "Test authorization for user Alice with READ permission."
+					},
+					"response": []
+				},
+				{
+					"name": "Multi-User - Bob (Write)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"principal\": \"arn:aws:iam::111236692387:user/bob\",\n  \"resource\": \"s3://raviteja-access-control/project-data/report.pdf\",\n  \"action\": \"write\",\n  \"cloudProvider\": \"aws\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/authorize",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"authorize"
+							]
+						},
+						"description": "Test authorization for user Bob with WRITE permission."
+					},
+					"response": []
+				},
+				{
+					"name": "Multi-User - Admin (Delete)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"principal\": \"arn:aws:iam::111236692387:user/admin\",\n  \"resource\": \"s3://raviteja-access-control/project-data/report.pdf\",\n  \"action\": \"delete\",\n  \"cloudProvider\": \"aws\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/authorize",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"authorize"
+							]
+						},
+						"description": "Test authorization for admin user with DELETE permission."
+					},
+					"response": []
+				},
+				{
+					"name": "Different Resource - EC2 Instance",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"principal\": \"arn:aws:iam::111236692387:user/devops\",\n  \"resource\": \"arn:aws:ec2:eu-west-1:111236692387:instance/i-1234567890abcdef0\",\n  \"action\": \"start\",\n  \"cloudProvider\": \"aws\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/authorize",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"authorize"
+							]
+						},
+						"description": "Test authorization for EC2 instance start operation."
+					},
+					"response": []
+				},
+				{
+					"name": "Different Resource - DynamoDB",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"principal\": \"arn:aws:iam::111236692387:user/developer\",\n  \"resource\": \"arn:aws:dynamodb:eu-west-1:111236692387:table/Users\",\n  \"action\": \"query\",\n  \"cloudProvider\": \"aws\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/authorize",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"authorize"
+							]
+						},
+						"description": "Test authorization for DynamoDB query operation."
+					},
+					"response": []
+				},
+				{
+					"name": "Different Resource - Lambda",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"principal\": \"arn:aws:iam::111236692387:user/developer\",\n  \"resource\": \"arn:aws:lambda:eu-west-1:111236692387:function:ProcessData\",\n  \"action\": \"invoke\",\n  \"cloudProvider\": \"aws\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/authorize",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"authorize"
+							]
+						},
+						"description": "Test authorization for Lambda function invocation."
+					},
+					"response": []
+				}
+			],
+			"description": "Advanced testing scenarios including multiple users and different AWS resource types."
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "awsRegion",
+			"value": "eu-west-1",
+			"type": "string"
+		},
+		{
+			"key": "s3Bucket",
+			"value": "raviteja-access-control",
+			"type": "string"
+		},
+		{
+			"key": "awsAccountId",
+			"value": "111236692387",
+			"type": "string"
+		},
+		{
+			"key": "lastRequestId",
+			"value": "",
+			"type": "string"
+		}
+	]
+}
