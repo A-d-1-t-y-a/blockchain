@@ -1,0 +1,203 @@
+================================================================================
+SCRIPTS GUIDE - Which Script to Use?
+================================================================================
+
+AVAILABLE SCRIPTS
+-----------------
+
+1. SETUP-AND-RUN.ps1 ⭐ RECOMMENDED
+   Purpose: Complete setup and run in one command
+   Use When: First time OR anytime you want fresh setup
+   What It Does:
+   - ✓ Checks prerequisites
+   - ✓ Cleans previous processes
+   - ✓ Installs all dependencies
+   - ✓ Compiles smart contracts
+   - ✓ Starts blockchain (new window)
+   - ✓ Deploys contracts
+   - ✓ Starts API server (new window)
+   - ✓ Verifies everything is working
+   
+   Command: .\SETUP-AND-RUN.ps1
+
+2. COMPLETE-SETUP.ps1
+   Purpose: Full setup (similar to SETUP-AND-RUN)
+   Use When: First time setup
+   What It Does:
+   - ✓ Creates .env if missing
+   - ✓ Installs dependencies
+   - ✓ Compiles contracts
+   - ✓ Starts blockchain
+   - ✓ Deploys contracts
+   - ✓ Starts API server
+   
+   Command: .\COMPLETE-SETUP.ps1
+
+3. QUICK-START.ps1
+   Purpose: Quick restart (assumes already set up)
+   Use When: System already configured, just need to restart
+   What It Does:
+   - ✓ Starts blockchain
+   - ✓ Deploys contracts
+   - ✓ Starts API server
+   - ✗ Does NOT install dependencies
+   - ✗ Does NOT compile contracts
+   
+   Command: .\QUICK-START.ps1
+
+4. RUN-APP.ps1
+   Purpose: Smart run with checks
+   Use When: Want to run with prerequisite verification
+   What It Does:
+   - ✓ Checks prerequisites
+   - ✓ Installs missing dependencies
+   - ✓ Compiles if needed
+   - ✓ Starts blockchain
+   - ✓ Deploys contracts (asks if already deployed)
+   - ✓ Starts API server
+   
+   Command: .\RUN-APP.ps1
+
+5. TEST-SYSTEM.ps1
+   Purpose: Automated testing
+   Use When: System is running, want to test all endpoints
+   What It Does:
+   - ✓ Tests health check
+   - ✓ Tests FROST configuration
+   - ✓ Tests authorization endpoints
+   - ✓ Tests AWS integration
+   - ✓ Tests S3 operations
+   - ✓ Performance testing
+   - ✓ Generates test report
+   
+   Command: .\TEST-SYSTEM.ps1
+
+================================================================================
+DECISION TREE
+================================================================================
+
+START HERE:
+│
+├─ First time using the project?
+│  └─ YES → Use SETUP-AND-RUN.ps1 ⭐
+│  └─ NO → Continue...
+│
+├─ System already set up, just need to restart?
+│  └─ YES → Use QUICK-START.ps1
+│  └─ NO → Continue...
+│
+├─ Want to verify prerequisites before running?
+│  └─ YES → Use RUN-APP.ps1
+│  └─ NO → Continue...
+│
+├─ System is running, want to test it?
+│  └─ YES → Use TEST-SYSTEM.ps1
+│  └─ NO → Use SETUP-AND-RUN.ps1 ⭐
+
+================================================================================
+TYPICAL WORKFLOW
+================================================================================
+
+Day 1 (First Time):
+  1. .\SETUP-AND-RUN.ps1
+  2. .\TEST-SYSTEM.ps1
+  3. Import Postman collection
+  4. Take screenshots
+
+Day 2+ (Subsequent Days):
+  1. .\QUICK-START.ps1
+  2. Test in Postman
+  3. Continue work
+
+After System Crash:
+  1. .\SETUP-AND-RUN.ps1
+  2. .\TEST-SYSTEM.ps1
+
+Before Demo/Presentation:
+  1. .\SETUP-AND-RUN.ps1
+  2. .\TEST-SYSTEM.ps1
+  3. Verify 100% success
+
+================================================================================
+COMPARISON TABLE
+================================================================================
+
+Feature                  | SETUP-AND-RUN | COMPLETE | QUICK | RUN-APP | TEST
+-------------------------|---------------|----------|-------|---------|------
+Install Dependencies     | ✓             | ✓        | ✗     | ✓       | ✗
+Compile Contracts        | ✓             | ✓        | ✗     | ✓       | ✗
+Start Blockchain         | ✓             | ✓        | ✓     | ✓       | ✗
+Deploy Contracts         | ✓             | ✓        | ✓     | ✓       | ✗
+Start API Server         | ✓             | ✓        | ✓     | ✓       | ✗
+Verify System            | ✓             | ✗        | ✗     | ✓       | ✓
+Run Tests                | ✗             | ✗        | ✗     | ✗       | ✓
+Clean Old Processes      | ✓             | ✗        | ✗     | ✗       | ✗
+Create .env if missing   | ✓             | ✓        | ✗     | ✗       | ✗
+Best for First Time      | ⭐⭐⭐         | ⭐⭐     | ✗     | ⭐      | ✗
+Best for Daily Use       | ⭐            | ✗        | ⭐⭐⭐ | ⭐      | ⭐⭐
+
+================================================================================
+WHAT EACH SCRIPT OUTPUTS
+================================================================================
+
+SETUP-AND-RUN.ps1:
+  - Step-by-step progress (9 steps)
+  - Opens 2 new windows (Blockchain, API)
+  - Shows system status
+  - Displays quick test commands
+  - Shows Postman instructions
+
+QUICK-START.ps1:
+  - Minimal output
+  - Opens 2 new windows
+  - Fast startup
+
+RUN-APP.ps1:
+  - Detailed checks (6 steps)
+  - Opens 2 new windows
+  - Shows configuration
+  - Displays test commands
+
+TEST-SYSTEM.ps1:
+  - Test results for each endpoint
+  - Success/failure indicators
+  - Performance metrics
+  - Final summary report
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Script fails with "Port already in use":
+  → Close Hardhat and API windows
+  → Run: Get-Process | Where-Object {$_.ProcessName -match 'node'} | Stop-Process
+  → Try again
+
+Script fails with "Module not found":
+  → Use SETUP-AND-RUN.ps1 (installs everything)
+
+Script fails with ".env not found":
+  → Use SETUP-AND-RUN.ps1 (creates .env from template)
+
+Want to start fresh:
+  → Close all windows
+  → Delete node_modules folders
+  → Run SETUP-AND-RUN.ps1
+
+================================================================================
+RECOMMENDATION
+================================================================================
+
+FOR MOST USERS:
+  Use SETUP-AND-RUN.ps1 ⭐
+
+It's the most comprehensive and handles everything automatically.
+Perfect for:
+  - First time setup
+  - After system updates
+  - Before demos/presentations
+  - When in doubt
+
+================================================================================
+END OF SCRIPTS GUIDE
+================================================================================

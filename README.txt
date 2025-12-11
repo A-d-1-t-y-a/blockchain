@@ -11,11 +11,14 @@ Date: December 11, 2025
 QUICK START
 ================================================================================
 
-FIRST TIME SETUP:
-  .\COMPLETE-SETUP.ps1
+ONE COMMAND - SETUP AND RUN (RECOMMENDED):
+  .\SETUP-AND-RUN.ps1
+  (Does everything: install, compile, deploy, start)
 
-SUBSEQUENT RUNS:
-  .\QUICK-START.ps1
+ALTERNATIVE OPTIONS:
+  First Time:  .\COMPLETE-SETUP.ps1
+  Quick Start: .\QUICK-START.ps1
+  Just Run:    .\RUN-APP.ps1
 
 RUN TESTS:
   .\TEST-SYSTEM.ps1
